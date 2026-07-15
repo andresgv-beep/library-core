@@ -1,0 +1,85 @@
+:root{
+  --ground:#151619; --panel:#1b1c21; --panel-2:#18191d; --card:#202127; --raise:#26272f;
+  --border:#2d2e38; --border-soft:#262730;
+  --ink:#e9e9f0; --ink-dim:#c3c3cf; --muted:#83838f; --faint:#5c5c68;
+  --accent:#7c6cf0; --accent-2:#9a8cff; --link:#93a0f6;
+  --so:#e8833a; --dk:#2f9fe6; --arch:#3d7bd6; --diablo:#c0402e; --syn:#2b8a6b; --book:#c98b5a;
+  /* Fondo de las baldosas de iconos (logos ZIM/marca). En oscuro se atenúa a un
+     gris suave para que no deslumbren; los logos siguen legibles. Claro = blanco. */
+  --icon-surface:#c9ccd5;
+  --shadow:0 1px 0 rgba(255,255,255,.02), 0 12px 32px -12px rgba(0,0,0,.6);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Cascadia Code","Consolas",monospace;
+}
+/* Tema claro: solo re-mapea los tokens del shell (el contenido del ZIM va en su iframe). */
+:root[data-theme="light"]{
+  --ground:#eaecf1; --panel:#f7f8fb; --panel-2:#e6e8ee; --card:#f7f8fb; --raise:#e0e3ea;
+  --border:#d5d8e1; --border-soft:#e3e5ec;
+  --ink:#1b1c24; --ink-dim:#3c3d49; --muted:#6a6b78; --faint:#9a9ba7;
+  --accent:#6a58e0; --accent-2:#7a6bf0; --link:#4a54c6;
+  --icon-surface:#ffffff;
+  --shadow:0 1px 2px rgba(20,20,40,.05), 0 14px 30px -16px rgba(20,20,50,.22);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body,#app{height:100%}
+body{font-family:var(--font);background:var(--ground);color:var(--ink);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input{font-family:inherit}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.ic{stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic.filled{fill:currentColor;stroke:none}
+
+/* scrollbars */
+.scroll::-webkit-scrollbar{width:10px}
+.scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;border:3px solid var(--ground)}
+.scroll.thin::-webkit-scrollbar{width:8px}
+.scroll.thin::-webkit-scrollbar-thumb{border:2px solid var(--panel)}
+
+/* ── Reskin del artículo del ZIM (§4.6, Modo A) ── */
+.zim-content{color:var(--ink-dim);font-size:16px;line-height:1.72;max-width:100%}
+.zim-content h1,.zim-content h2,.zim-content h3,.zim-content h4,.zim-content h5{color:var(--ink);font-weight:650;line-height:1.25;letter-spacing:-.2px;margin:1.7em 0 .5em;scroll-margin-top:20px}
+.zim-content h1{font-size:29px}
+.zim-content h2{font-size:22px;padding-bottom:.3em;border-bottom:1px solid var(--border)}
+.zim-content h3{font-size:18px}
+.zim-content h4{font-size:15px;color:var(--ink-dim)}
+.zim-content p{margin:1em 0}
+.zim-content a{color:var(--link);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--link) 30%,transparent);cursor:pointer}
+.zim-content a:hover{border-bottom-color:var(--link)}
+.zim-content code{font-family:var(--mono);font-size:.88em;background:var(--raise);color:#cdbcff;padding:.14em .42em;border-radius:5px}
+.zim-content pre{background:#0e0e15;border:1px solid var(--border);border-radius:11px;padding:15px 17px;overflow-x:auto;margin:1.2em 0;line-height:1.55}
+.zim-content pre code{background:none;color:#d3d3e0;padding:0;font-size:13.5px}
+.zim-content table{border-collapse:collapse;width:100%;margin:1.3em 0;font-size:14px;display:block;overflow-x:auto}
+.zim-content th,.zim-content td{border:1px solid var(--border);padding:9px 13px;text-align:left;vertical-align:top}
+.zim-content th{background:var(--raise);color:var(--ink);font-weight:600}
+.zim-content ul,.zim-content ol{padding-left:1.4em;margin:1em 0}
+.zim-content li{margin:.35em 0}
+.zim-content blockquote{border-left:3px solid var(--accent);padding:2px 0 2px 15px;color:var(--muted);margin:1.1em 0}
+.zim-content img{max-width:100%;height:auto;border-radius:8px}
+.zim-content hr{border:none;border-top:1px solid var(--border);margin:1.6em 0}
+.zim-content h1:first-child,.zim-content h2:first-child{margin-top:0}
+/* Infobox de Wikipedia → tarjeta flotante estilo NimOS (como el mockup) */
+.zim-content table.infobox,.zim-content .infobox{float:right;clear:right;width:300px;max-width:42%;margin:4px 0 18px 24px;background:var(--card);border:1px solid var(--border);border-radius:13px;font-size:13px;display:table;overflow:hidden;box-shadow:var(--shadow)}
+.zim-content .infobox th,.zim-content .infobox td{border:none;border-bottom:1px solid var(--border-soft);padding:8px 13px;background:none}
+.zim-content .infobox tr:last-child th,.zim-content .infobox tr:last-child td{border-bottom:none}
+.zim-content .infobox caption{caption-side:top;padding:12px 13px;font-weight:650;color:var(--ink);font-size:15px}
+.zim-content .infobox img{border-radius:8px;max-width:100%;height:auto}
+.zim-content .infobox a{color:var(--link)}
+/* Miniaturas / figuras de Wikipedia */
+.zim-content figure,.zim-content .thumb{margin:1.2em 0}
+.zim-content .thumb .thumbinner{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:10px;display:inline-block;max-width:100%}
+.zim-content figcaption,.zim-content .thumbcaption{font-size:12.5px;color:var(--muted);margin-top:7px;line-height:1.4}
+/* Portales / páginas-mosaico de Wikipedia: tarjetas <a.item> en rejilla fluida
+   (kiwix las tilea con su CSS; nosotros lo recreamos con estética NimOS) */
+.zim-content div:has(> a.item){display:flex;flex-wrap:wrap;gap:14px;margin:1.2em 0}
+.zim-content a.item{flex:1 1 260px;max-width:380px;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:13px;overflow:hidden;text-decoration:none;color:var(--ink);border-bottom:1px solid var(--border);transition:border-color .12s,transform .12s;box-shadow:var(--shadow)}
+.zim-content a.item:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--border));transform:translateY(-2px)}
+.zim-content a.item figure{margin:0;flex:none}
+.zim-content a.item img{width:100%;height:170px;object-fit:cover;border-radius:0;display:block}
+.zim-content a.item > :not(figure){padding:9px 12px;font-size:13px;font-weight:550;line-height:1.35}
+.zim-content a.item figcaption{padding:9px 12px;font-size:13px;font-weight:550;color:var(--ink)}
+/* Las páginas-mosaico (index/portal) usan más ancho, con margen lateral;
+   los artículos de texto se quedan en su ancho de lectura cómodo. */
+.wrap:has(a.item){max-width:1360px}
+@media (max-width:640px){.zim-content table.infobox,.zim-content .infobox{float:none;width:100%;max-width:100%;margin:1em 0}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}

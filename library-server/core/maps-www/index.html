@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nimos Maps — Catalunya</title>
+<link rel="stylesheet" href="/maps/vendor/maplibre-gl.css">
+<style>
+  :root{ --accent:#7c6cf0; --accent-2:#9a8cff; --panel:#111117; --border:#23232e; --ink:#e9e9f0; --muted:#83838f; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body,#map{height:100%;width:100%}
+  body{font-family:-apple-system,"Segoe UI",system-ui,sans-serif;background:#0b0b0f;overflow:hidden}
+  /* Tema claro: re-mapea los tokens de la caja/hint (el mapa cambia por su estilo). */
+  body[data-flavor="light"]{background:#f4f5f8;--panel:#ffffff;--border:#e0e2ea;--ink:#1b1c24;--muted:#6a6b78;--accent-2:#6a58e0}
+  body[data-flavor="light"] #results button:hover{background:#eceef3}
+  body[data-flavor="light"] .hint{background:rgba(255,255,255,.85);color:#6a6b78}
+  .search{position:absolute;top:16px;left:16px;z-index:10;width:360px;max-width:calc(100vw - 32px)}
+  .box{display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;background:var(--panel);border:1px solid var(--border);border-radius:13px;box-shadow:0 12px 32px -12px rgba(0,0,0,.6)}
+  .box svg{width:19px;height:19px;flex:none;stroke:var(--muted);stroke-width:1.7;fill:none;stroke-linecap:round}
+  .box input{flex:1;background:none;border:none;outline:none;color:var(--ink);font-size:15px}
+  .box input::placeholder{color:var(--muted)}
+  .box .brand{font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--accent-2);text-transform:uppercase;flex:none}
+  #results{margin-top:8px;background:var(--panel);border:1px solid var(--border);border-radius:13px;overflow:hidden;box-shadow:0 12px 32px -12px rgba(0,0,0,.6)}
+  #results:empty{display:none}
+  #results button{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;padding:10px 14px;background:none;border:none;color:var(--ink);cursor:pointer;border-bottom:1px solid var(--border)}
+  #results button:last-child{border-bottom:none}
+  #results button:hover{background:#1c1c25}
+  #results button b{font-size:14px;font-weight:550}
+  #results button small{font-size:12px;color:var(--muted)}
+  .hint{position:absolute;bottom:12px;left:16px;z-index:10;font-size:11.5px;color:var(--muted);background:rgba(17,17,23,.8);padding:5px 10px;border-radius:8px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="search">
+  <div class="box">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+    <input id="q" placeholder="Busca una calle o lugar de Catalunya…" autocomplete="off" spellcheck="false">
+    <span class="brand">Nimos Maps</span>
+  </div>
+  <div id="results"></div>
+</div>
+<div class="hint" id="hint">Cargando mapa…</div>
+
+<script src="/maps/vendor/maplibre-gl.js"></script>
+<script src="/maps/vendor/pmtiles.js"></script>
+<script>
+(async () => {
+  const protocol = new pmtiles.Protocol();
+  maplibregl.addProtocol('pmtiles', protocol.tile);
+
+  // El mapa va SIEMPRE en claro (decisión de Andrés): resalta más dentro del shell
+  // oscuro de Nimos (mapa luminoso flotando) y en tema claro queda cohesionado,
+  // como un mapa normal. Se descartó el estilo oscuro del mapa.
+  const flavor = 'light';
+  document.body.dataset.flavor = flavor;
+  const layers = await (await fetch('/maps/style-' + flavor + '.json')).json();
+  const style = {
+    version: 8,
+    glyphs: '/maps/fonts/{fontstack}/{range}.pbf',   // vendorizado (offline)
+    sprite: '/maps/sprites/' + flavor,                // vendorizado (offline)
+    sources: {
+      protomaps: { type: 'vector', url: 'pmtiles://' + location.origin + '/mapdata/catalunya.pmtiles', attribution: '© OpenStreetMap' }
+    },
+    layers
+  };
+  const map = new maplibregl.Map({ container: 'map', style, center: [2.1734, 41.3851], zoom: 12, hash: true, attributionControl: false });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+  map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+  window._map = map;
+
+  const hint = document.getElementById('hint');
+  map.on('load', () => { hint.textContent = 'Catalunya · Protomaps + MapLibre (offline)'; });
+  map.on('error', (e) => { hint.textContent = 'Error: ' + (e.error && e.error.message || 'mapa'); });
+
+  // ── Buscador → /api/maps/geocode (se conecta cuando el backend esté listo) ──
+  const q = document.getElementById('q'), results = document.getElementById('results');
+  let marker, timer;
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+  async function search() {
+    const term = q.value.trim();
+    if (!term) { results.innerHTML = ''; return; }
+    let list = [];
+    try { list = await (await fetch('/api/maps/geocode?q=' + encodeURIComponent(term))).json(); } catch (e) {}
+    results.innerHTML = '';
+    for (const r of (list || []).slice(0, 8)) {
+      const b = document.createElement('button');
+      b.innerHTML = '<b></b><small></small>';
+      b.querySelector('b').textContent = r.name;
+      b.querySelector('small').textContent = r.context || '';
+      b.onclick = () => go(r);
+      results.appendChild(b);
+    }
+  }
+  function go(r) {
+    map.flyTo({ center: [r.lon, r.lat], zoom: 16.5 });
+    if (marker) marker.remove();
+    marker = new maplibregl.Marker({ color: '#7c6cf0' }).setLngLat([r.lon, r.lat]).addTo(map);
+    results.innerHTML = ''; q.value = r.name;
+  }
+})();
+</script>
+</body>
+</html>

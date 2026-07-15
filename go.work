@@ -1,0 +1,8 @@
+go 1.26.4
+
+use (
+	./engines/zim-engine
+	./library-server/core
+	./library-server/translate-wrap
+	./library-desktop
+)

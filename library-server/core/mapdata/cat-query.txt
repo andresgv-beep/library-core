@@ -1,0 +1,7 @@
+[out:json][timeout:600];
+area["ISO3166-2"="ES-CT"]->.cat;
+(
+  node["place"]["name"](area.cat);
+  way["highway"]["name"](area.cat);
+);
+out center tags;
