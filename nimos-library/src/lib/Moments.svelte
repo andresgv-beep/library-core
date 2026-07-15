@@ -125,8 +125,13 @@
 {#snippet videoCard(it)}
   {@const p = prog(it)}
   <button class="card" onclick={() => onOpenItem?.(it.id)}>
-    <div class="poster" class:img={cover(it)}>
-      {#if cover(it)}<img src={cover(it)} alt={it.title} loading="lazy" />{/if}
+    <div class="poster" class:img={cover(it) || it.open?.url}>
+      {#if cover(it)}
+        <img src={cover(it)} alt={it.title} loading="lazy" />
+      {:else if it.open?.url}
+        <!-- Sin miniatura: primer frame del vídeo (fragmento #t=) en vez de un placeholder. -->
+        <video class="vframe" src="{it.open.url}#t=0.1" preload="metadata" muted playsinline aria-hidden="true"></video>
+      {/if}
       {#if it.duration}<div class="dur">{hms(it.duration)}</div>{/if}
       <div class="play"><span><svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M8 6l10 6-10 6z"/></svg></span></div>
       {#if p}<div class="prog"><i style="width:{pct(p)}%"></i></div>{/if}
@@ -369,7 +374,7 @@
   .card { cursor: pointer; display: flex; flex-direction: column; gap: 11px; text-align: left; background: none; border: 0; padding: 0; color: inherit; }
   .poster { position: relative; aspect-ratio: 16/9; border-radius: 13px; overflow: hidden; border: 1px solid var(--border); box-shadow: var(--shadow); transition: transform .14s, border-color .14s; background: radial-gradient(130% 130% at 28% 18%,#3a2f6e 0%,#1a1740 42%,#07070f 100%); }
   .poster.img { background: #000; }
-  .poster img { width: 100%; height: 100%; object-fit: cover; }
+  .poster img, .poster video.vframe { width: 100%; height: 100%; object-fit: cover; display: block; }
   .card:hover .poster { transform: translateY(-3px); border-color: color-mix(in srgb,var(--accent) 45%,var(--border)); }
   .poster .dur { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.82); color: #fff; font-size: 11.5px; font-weight: 600; padding: 2px 6px; border-radius: 6px; font-variant-numeric: tabular-nums; }
   .poster .play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .14s; }
