@@ -25,6 +25,10 @@
   // Reproductor custom (barra de progreso con capítulos).
   let playerEl = $state(null), seekEl = $state(null);
   let playing = $state(false), curTime = $state(0), dur = $state(0);
+  // buffering: el <video> disparó play (playing=true) pero está esperando datos/
+  // decodificando (evento `waiting`) → sin esto el botón queda en "pausa" y el
+  // frame congelado parece un cuelgue. Mostramos spinner mientras dura.
+  let buffering = $state(false);
   let muted = $state(false), vol = $state(1), ccOn = $state(false), isFs = $state(false);
   let seeking = $state(false), hoverPct = $state(null);
 
@@ -237,17 +241,21 @@
         <div class="player" bind:this={playerEl} class:playing>
           <!-- svelte-ignore a11y_media_has_caption -->
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-          <video bind:this={videoEl} poster={cover} preload="metadata"
+          <video bind:this={videoEl} poster={cover} preload="auto"
                  ontimeupdate={onTime} onloadedmetadata={onMeta} onclick={togglePlay}
-                 onplay={() => (playing = true)} onpause={() => { playing = false; flushProgress(); }}
-                 onended={() => { playing = false; flushProgress(); }}>
+                 onplay={() => (playing = true)} onpause={() => { playing = false; buffering = false; flushProgress(); }}
+                 onwaiting={() => (buffering = true)} onplaying={() => (buffering = false)}
+                 oncanplay={() => (buffering = false)} onstalled={() => (buffering = true)}
+                 onended={() => { playing = false; buffering = false; flushProgress(); }}>
             <source src={url} type="video/mp4" />
             {#each subtitles as s (s.lang)}
               <track kind="subtitles" src={s.url} srclang={s.lang} label={s.lang.toUpperCase()} />
             {/each}
           </video>
 
-          {#if !playing}
+          {#if buffering}
+            <div class="vspin-wrap" aria-hidden="true"><span class="vspin"></span></div>
+          {:else if !playing}
             <button class="bigplay" onclick={togglePlay} aria-label="Play">
               <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
             </button>
@@ -373,6 +381,11 @@
   /* Botón grande de play cuando está pausado */
   .bigplay { position: absolute; inset: 0; margin: auto; width: 66px; height: 66px; border-radius: 999px; background: rgba(0,0,0,.5); color: #fff; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.28); cursor: pointer; transition: background .14s, transform .14s; }
   .bigplay:hover { background: rgba(0,0,0,.68); transform: scale(1.05); }
+
+  /* Spinner de buffering: el <video> disparó play pero está esperando datos. */
+  .vspin-wrap { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  .vspin { width: 46px; height: 46px; border-radius: 50%; border: 3px solid rgba(255,255,255,.25); border-top-color: #fff; animation: vspin .8s linear infinite; }
+  @keyframes vspin { to { transform: rotate(360deg); } }
 
   /* Barra de controles propia (aparece al pasar el ratón; siempre visible en pausa) */
   .vctrl { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 14px 9px; background: linear-gradient(transparent, rgba(0,0,0,.78)); display: flex; flex-direction: column; gap: 4px; opacity: 0; transition: opacity .18s; }
