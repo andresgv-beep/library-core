@@ -20,6 +20,9 @@ func seedCollection(t *testing.T, root, coll, media, content string, sc sidecar)
 		t.Fatal(err)
 	}
 	sc.Media = media
+	if sc.Source == "" { // por defecto, contenido propio para que el escáner lo tome
+		sc.Source = "cabinet"
+	}
 	raw, _ := json.MarshalIndent(sc, "", "  ")
 	base := media[:len(media)-len(filepath.Ext(media))]
 	if err := os.WriteFile(filepath.Join(dir, base+".json"), raw, 0o644); err != nil {
@@ -33,10 +36,10 @@ func seedCollection(t *testing.T, root, coll, media, content string, sc sidecar)
 func TestMediaScan(t *testing.T) {
 	root := t.TempDir()
 	seedCollection(t, root, "Biblioteca/Libros", "westminster.pdf", "%PDF-1.4 fake",
-		sidecar{Template: "pdf", Title: "Westminster Abbey", Author: "Stanley", Source: "manual",
+		sidecar{Template: "pdf", Title: "Westminster Abbey", Author: "Stanley", Source: "cabinet",
 			SourceURL: "https://example.org/item/x"})
 	seedCollection(t, root, "Biblioteca/Video", "caligari.mp4", "fake mp4",
-		sidecar{Template: "video", Title: "Caligari", Source: "manual"})
+		sidecar{Template: "video", Title: "Caligari", Source: "moments"})
 
 	md := &mediaDeps{root: root}
 
@@ -72,7 +75,7 @@ func TestMediaScan(t *testing.T) {
 func TestMediaScanEscapesSpaces(t *testing.T) {
 	root := t.TempDir()
 	seedCollection(t, root, "Biblioteca/Libros", "un libro con espacios.pdf", "x",
-		sidecar{Template: "pdf", Title: "Con espacios"})
+		sidecar{Template: "pdf", Title: "Con espacios", Source: "cabinet"})
 	items, _ := (&mediaDeps{root: root}).scan("")
 	if len(items) != 1 {
 		t.Fatalf("quería 1 item, hay %d", len(items))
@@ -85,7 +88,7 @@ func TestMediaScanEscapesSpaces(t *testing.T) {
 func TestMediaServeAndRange(t *testing.T) {
 	root := t.TempDir()
 	body := "0123456789ABCDEF"
-	seedCollection(t, root, "Biblioteca/Libros", "f.pdf", body, sidecar{Template: "pdf", Title: "T"})
+	seedCollection(t, root, "Biblioteca/Libros", "f.pdf", body, sidecar{Template: "pdf", Title: "T", Source: "cabinet"})
 
 	md := &mediaDeps{root: root}
 	srv := httptest.NewServer(http.HandlerFunc(md.handleMediaFile))

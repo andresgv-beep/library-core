@@ -49,7 +49,7 @@ func TestMediaItemContract(t *testing.T) {
 			Title:       "Linux Bible",
 			Author:      "Christopher Negus",
 			Description: "A practical Linux reference.",
-			Source:      "archive",
+			Source:      "cabinet",
 			SourceURL:   "https://example.org/item/linux-bible",
 		})
 

@@ -13,6 +13,13 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// isOwnMediaSource: los carriles que library-core reconoce como CONTENIDO PROPIO
+// (subido por el operador). Cualquier otro (archives/youtube/local… de un pool
+// legacy compartido) se ignora en todas las superficies y el buscador.
+func isOwnMediaSource(source string) bool {
+	return source == "moments" || source == "cabinet"
+}
+
 // channelSlug normaliza el nombre de un canal/autor a un identificador seguro para
 // nombre de fichero: minúsculas, alfanumérico ASCII, el resto → '-'. Así el logo
 // del canal se guarda por CANAL (channel-<slug>.jpg), no por carpeta: vídeos del

@@ -52,7 +52,7 @@
       // items que sus subcarpetas). Los vídeos NO son de aquí (viven en Moments).
       const seen = new Set();
       items = groups.flat()
-        .filter((it) => it.source?.provider !== 'moments')
+        .filter((it) => it.source?.provider === 'cabinet')
         .filter((it) => (seen.has(it.id) ? false : (seen.add(it.id), true)));
       pickFeatured(); // rota el destacado en cada carga de Cabinet
       await loadContinue();
