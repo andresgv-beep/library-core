@@ -133,7 +133,7 @@
     </div>
     <div class="cmeta">
       <div class="av" class:img={avatar(it)}>
-        {#if avatar(it)}<img src={avatar(it)} alt="" />{:else}{initials(chanOf(it) || 'YT')}{/if}
+        {#if avatar(it)}<img src={avatar(it)} alt="" />{:else}{initials(chanOf(it) || '?')}{/if}
       </div>
       <div class="ct">
         <h3>{it.title}</h3>
@@ -164,7 +164,7 @@
           onHome={goInicio} />
       </div>
 
-      {#if channels.length > 1}
+      {#if channels.length > 0}
         <!-- Tira de canales en miniatura + botón cuadrado a la izquierda -->
         <div class="creators">
           <button class="tggl" onclick={() => (channelsView ? backHome() : openChannels())}

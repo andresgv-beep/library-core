@@ -92,6 +92,25 @@ export const getMedia = () =>
   getJSON('/api/media').then((d) => d.items || []).catch(() => [])
 export const deleteMedia = (id) => postJSON('/api/admin/media/delete', { id })
 
+// Carga manual (Moments/Cabinet): multipart con fichero + metadatos + imágenes.
+// files: { file, cover, channel_avatar }. Devuelve la respuesta cruda.
+export function uploadContent(fields, files = {}, url = '/api/admin/upload') {
+  const fd = new FormData()
+  for (const [k, v] of Object.entries(fields)) {
+    if (v != null && String(v).trim() !== '') fd.append(k, v)
+  }
+  for (const [k, f] of Object.entries(files)) {
+    if (f) fd.append(k, f)
+  }
+  return fetch(url, { method: 'POST', body: fd })
+}
+
+// Editar la ficha de un item ya en el pool (metadatos + imágenes + visibilidad).
+// El fichero de media no se cambia. id = ID del item (ruta del sidecar).
+export function updateContent(id, fields, files = {}) {
+  return uploadContent({ ...fields, id }, files, '/api/admin/media/update')
+}
+
 // Importar · Cola de descargas administrativas
 export const listDownloads = () =>
   getJSON('/api/downloads').then((d) => d.jobs || []).catch(() => [])
