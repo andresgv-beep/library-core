@@ -133,10 +133,14 @@ func (s *Server) handleMediaUpdate(u *uploadDeps) http.HandlerFunc {
 			cf.Close()
 		}
 		if af, _, aerr := r.FormFile("channel_avatar"); aerr == nil {
-			dst := filepath.Join(dir, "channel.jpg")
+			avName := channelAvatarName(sc.Author)
+			if avName == "" {
+				avName = strings.TrimSuffix(sc.Media, filepath.Ext(sc.Media)) + ".channel.jpg"
+			}
+			dst := filepath.Join(dir, avName)
 			_ = os.Remove(dst)
 			if saveMultipart(af, dst) == nil {
-				sc.ChannelAvatar = "channel.jpg"
+				sc.ChannelAvatar = avName
 			}
 			af.Close()
 		}
@@ -255,14 +259,21 @@ func (s *Server) handleUpload(u *uploadDeps) http.HandlerFunc {
 			cf.Close()
 		}
 
-		// Logo del canal / autor (carril vídeo) → channel.jpg de la carpeta, como el
-		// patrón antiguo. Es distinto de la miniatura del vídeo (cover).
+		author := strings.TrimSpace(r.FormValue("author"))
+
+		// Logo del canal / autor → channel-<slug>.jpg (POR CANAL, no por carpeta):
+		// vídeos del mismo canal lo comparten; canales distintos no se pisan. Sin
+		// autor, por-vídeo (<base>.channel.jpg). Distinto de la miniatura (cover).
 		channelAvatar := ""
 		if af, _, aerr := r.FormFile("channel_avatar"); aerr == nil {
-			if adst, derr := u.dest(appDir, collection, "channel.jpg"); derr == nil {
+			avName := channelAvatarName(author)
+			if avName == "" {
+				avName = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".channel.jpg"
+			}
+			if adst, derr := u.dest(appDir, collection, avName); derr == nil {
 				_ = os.Remove(adst) // el admin lo reemplaza a voluntad
 				if saveMultipart(af, adst) == nil {
-					channelAvatar = "channel.jpg"
+					channelAvatar = avName
 				}
 			}
 			af.Close()
@@ -277,7 +288,7 @@ func (s *Server) handleUpload(u *uploadDeps) http.HandlerFunc {
 			Template:    template,
 			Media:       filename,
 			Title:       firstNonEmpty(strings.TrimSpace(r.FormValue("title")), titleFromFilename(filename)),
-			Author:      strings.TrimSpace(r.FormValue("author")),
+			Author:      author,
 			Date:        strings.TrimSpace(r.FormValue("date")),
 			Description: strings.TrimSpace(r.FormValue("description")),
 			Tags:        tags,

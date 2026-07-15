@@ -230,13 +230,16 @@ func (m *mediaDeps) toItem(sidecarPath string, sc sidecar) mediaItem {
 	for _, s := range sc.Subtitles {
 		subs = append(subs, mediaSub{Lang: s.Lang, URL: mediaURLFor(s.File)})
 	}
-	// Imagen del canal: del sidecar, o (fallback) si hay un channel.jpg en la carpeta
-	// aunque el sidecar sea viejo — así los vídeos ya importados también la muestran.
+	// Imagen del canal: del sidecar, o (fallback) el logo del canal por autor
+	// (channel-<slug>.jpg) si existe en la carpeta — así otros vídeos del MISMO
+	// canal lo comparten sin re-subirlo, y canales distintos no se pisan.
 	channelAvatarURL := ""
 	if sc.ChannelAvatar != "" {
 		channelAvatarURL = mediaURLFor(sc.ChannelAvatar)
-	} else if _, err := os.Stat(filepath.Join(dir, "channel.jpg")); err == nil {
-		channelAvatarURL = mediaURLFor("channel.jpg")
+	} else if name := channelAvatarName(sc.Author); name != "" {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			channelAvatarURL = mediaURLFor(name)
+		}
 	}
 
 	textURL := ""
