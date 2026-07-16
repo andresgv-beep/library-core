@@ -350,11 +350,13 @@ func loadPostcodes(path, prefixes string) ([]geoRow, error) {
 
 // ─── /api/maps/geocode ────────────────────────────────────────────────────────
 type GeoHit struct {
-	Name    string  `json:"name"`
-	Kind    string  `json:"kind"`
-	Lat     float64 `json:"lat"`
-	Lon     float64 `json:"lon"`
-	Context string  `json:"context,omitempty"`
+	Name        string  `json:"name"`
+	Kind        string  `json:"kind"`
+	Lat         float64 `json:"lat"`
+	Lon         float64 `json:"lon"`
+	Context     string  `json:"context,omitempty"`
+	HouseNumber string  `json:"houseNumber,omitempty"`
+	Approximate bool    `json:"approximate,omitempty"`
 }
 
 func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
@@ -392,11 +394,33 @@ func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
 		}
 		hits = appendUniqueGeoHits(hits, geoSearch(geo, match, q, bbox), 12)
 		if len(hits) > 0 {
+			if number := geoHouseNumber(q); number != "" {
+				for i := range hits {
+					if strings.HasPrefix(hits[i].Kind, "street") {
+						hits[i].HouseNumber, hits[i].Approximate = number, true
+					}
+				}
+			}
 			writeJSON(w, http.StatusOK, hits)
 			return
 		}
 	}
 	writeJSON(w, http.StatusOK, []GeoHit{})
+}
+
+func geoHouseNumber(q string) string {
+	q = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(",.-/", r) {
+			return ' '
+		}
+		return r
+	}, q)
+	for _, token := range strings.Fields(q) {
+		if isAllDigits(token) && len(token) <= 4 {
+			return token
+		}
+	}
+	return ""
 }
 
 func appendUniqueGeoHits(dst, src []GeoHit, limit int) []GeoHit {

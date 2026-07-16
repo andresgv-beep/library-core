@@ -14,6 +14,10 @@ library-server/data/
 **/.gocache/
 # carpetas temporales de trabajo
 **/.tmp-*/
+# workspace de Go: comodidad LOCAL (gopls/editor). Los builds usan cada go.mod
+# con su replace, no el workspace. Se regenera solo y ensuciaba el repo sin parar.
+go.work
+go.work.sum
 
 # artefactos de datos del motor (nunca al repo; se regeneran)
 **/*.zim

@@ -260,6 +260,7 @@ func main() {
 	adminMux.HandleFunc("/api/admin/maps/index/cancel", mapAdmin.handleStreetIndexCancel)
 	mux.HandleFunc("/api/maps/config", mapAdmin.handlePublicConfig)
 	mux.HandleFunc("/api/maps/tiles/", mapAdmin.handlePublicTile)
+	mux.HandleFunc("/api/maps/nearby", mapAdmin.handleNearby)
 
 	// Motor de descargas (catálogo ZIM y descargas manuales del admin). DB propia
 	// para no estrangular library.db con SetMaxOpenConns(1). DOWNLOAD_ROOT es la

@@ -12,22 +12,25 @@
   body{font-family:-apple-system,"Segoe UI",system-ui,sans-serif;background:#0b0b0f;overflow:hidden}
   /* Tema claro: re-mapea los tokens de la caja/hint (el mapa cambia por su estilo). */
   body[data-flavor="light"]{background:#f4f5f8;--panel:#ffffff;--border:#e0e2ea;--ink:#1b1c24;--muted:#6a6b78;--accent-2:#6a58e0}
-  body[data-flavor="light"] #results button:hover{background:#eceef3}
   body[data-flavor="light"] .hint{background:rgba(255,255,255,.85);color:#6a6b78}
-  .search{position:absolute;top:16px;left:16px;z-index:10;width:360px;max-width:calc(100vw - 32px)}
+  .search{position:absolute;top:16px;left:16px;z-index:12;width:360px;max-width:calc(100vw - 32px)}
   .box{display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;background:var(--panel);border:1px solid var(--border);border-radius:13px;box-shadow:0 12px 32px -12px rgba(0,0,0,.6)}
   .box svg{width:19px;height:19px;flex:none;stroke:var(--muted);stroke-width:1.7;fill:none;stroke-linecap:round}
   .box input{flex:1;background:none;border:none;outline:none;color:var(--ink);font-size:15px}
   .box input::placeholder{color:var(--muted)}
   .box .brand{font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--accent-2);text-transform:uppercase;flex:none}
-  #results{margin-top:8px;background:var(--panel);border:1px solid var(--border);border-radius:13px;overflow:hidden;box-shadow:0 12px 32px -12px rgba(0,0,0,.6)}
-  #results:empty{display:none}
-  #results button{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;padding:10px 14px;background:none;border:none;color:var(--ink);cursor:pointer;border-bottom:1px solid var(--border)}
-  #results button:last-child{border-bottom:none}
-  #results button:hover{background:#1c1c25}
-  #results button b{font-size:14px;font-weight:550}
-  #results button small{font-size:12px;color:var(--muted)}
-  #results .no-results{padding:11px 14px;color:var(--muted);font-size:12px;line-height:1.4}
+  .side-panel{position:absolute;z-index:11;top:12px;left:390px;width:410px;max-width:calc(100vw - 422px);max-height:calc(100vh - 24px);overflow:auto;padding:24px 42px 28px 30px;color:var(--ink);background:linear-gradient(90deg,rgba(17,17,23,.96) 0%,rgba(17,17,23,.86) 72%,rgba(17,17,23,0) 100%);filter:drop-shadow(12px 12px 26px rgba(0,0,0,.25));border:none;border-radius:18px 0 0 18px;scrollbar-width:thin}
+  body[data-flavor="light"] .side-panel{background:linear-gradient(90deg,rgba(255,255,255,.97) 0%,rgba(255,255,255,.88) 72%,rgba(255,255,255,0) 100%)}
+  .side-panel[hidden]{display:none}.panel-label{font-size:10px;font-weight:750;letter-spacing:1.2px;text-transform:uppercase;color:var(--accent-2);margin-bottom:9px}
+  #results button,.nearby-item{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;text-align:left;padding:11px 5px;background:none;border:none;color:var(--ink);cursor:pointer}
+  #results button+button,.nearby-item+.nearby-item{background-image:linear-gradient(90deg,transparent,rgba(130,130,145,.16),transparent);background-repeat:no-repeat;background-size:100% 1px}
+  #results button:hover,.nearby-item:hover{transform:translateX(3px);transition:transform .14s ease}
+  .result-icon,.nearby-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:rgba(124,108,240,.14);color:var(--accent-2);font-size:16px}
+  .result-copy,.nearby-copy{display:flex;min-width:0;flex-direction:column;gap:2px}.result-copy b,.nearby-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}.result-copy small,.nearby-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--muted)}
+  .distance{font-size:11px;color:var(--muted);white-space:nowrap}#results .no-results{padding:9px 4px;color:var(--muted);font-size:12px;line-height:1.5}
+  .back{display:flex;align-items:center;gap:6px;margin:0 0 16px;padding:0;background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer}.address{font-size:21px;line-height:1.18;font-weight:680;letter-spacing:-.3px}.address-context{margin-top:7px;color:var(--muted);font-size:12px;line-height:1.45}.approx{display:inline-block;margin-top:9px;padding:4px 8px;border-radius:8px;background:rgba(124,108,240,.12);color:var(--accent-2);font-size:10.5px}
+  .nearby-head{display:flex;align-items:baseline;justify-content:space-between;margin-top:24px;margin-bottom:5px}.nearby-head h3{font-size:14px;font-weight:650}.nearby-head span{font-size:10.5px;color:var(--muted)}.nearby-empty{padding:12px 4px;color:var(--muted);font-size:12px}
+  @media(max-width:820px){.side-panel{top:72px;left:12px;width:420px;max-width:calc(100vw - 24px);max-height:calc(100vh - 84px);background:linear-gradient(180deg,rgba(17,17,23,.97),rgba(17,17,23,.86) 84%,rgba(17,17,23,0));border-radius:18px 18px 0 0}body[data-flavor="light"] .side-panel{background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(255,255,255,.9) 84%,rgba(255,255,255,0))}}
   .hint{position:absolute;bottom:12px;left:16px;z-index:10;font-size:11.5px;color:var(--muted);background:rgba(17,17,23,.8);padding:5px 10px;border-radius:8px}
 </style>
 </head>
@@ -39,8 +42,16 @@
     <input id="q" placeholder="Busca una calle o lugar…" autocomplete="off" spellcheck="false">
     <span class="brand">Nimos Maps</span>
   </div>
-  <div id="results"></div>
 </div>
+<aside class="side-panel" id="sidePanel" hidden>
+  <section id="searchView"><div class="panel-label">Resultados</div><div id="results"></div></section>
+  <section id="placeView" hidden>
+    <button class="back" id="backResults">&#8592; Volver a resultados</button>
+    <div class="panel-label">Ubicación</div><h2 class="address" id="address"></h2><p class="address-context" id="addressContext"></p>
+    <span class="approx" id="approx" hidden>Posición aproximada de la calle</span>
+    <div class="nearby-head"><h3>Cerca de aquí</h3><span>ordenado por distancia</span></div><div id="nearby"></div>
+  </section>
+</aside>
 <div class="hint" id="hint">Cargando mapa…</div>
 
 <script src="/maps/vendor/maplibre-gl.js"></script>
@@ -71,8 +82,8 @@
   const renderMaxZoom = Math.min(14, archiveMaxZoom);
   const style = {
     version: 8,
-    glyphs: '/maps/fonts/{fontstack}/{range}.pbf',   // vendorizado (offline)
-    sprite: '/maps/sprites/' + flavor,                // vendorizado (offline)
+    glyphs: location.origin + '/maps/fonts/{fontstack}/{range}.pbf', // vendorizado (offline)
+    sprite: location.origin + '/maps/sprites/' + flavor,             // vendorizado (offline)
     sources: {
       // Core extrae cada tesela del PMTiles local. Evitamos rangos aleatorios
       // de varios GB en WebView2 y el mismo endpoint sirve a toda la LAN.
@@ -98,38 +109,77 @@
 
   // ── Buscador → /api/maps/geocode (se conecta cuando el backend esté listo) ──
   const q = document.getElementById('q'), results = document.getElementById('results');
-  let marker, timer;
+  const sidePanel = document.getElementById('sidePanel'), searchView = document.getElementById('searchView');
+  const placeView = document.getElementById('placeView'), nearby = document.getElementById('nearby');
+  let marker, poiMarker, timer, lastResults = [], searchController;
   q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+  q.addEventListener('keydown', e => { if (e.key === 'Enter' && lastResults[0]) go(lastResults[0]); if (e.key === 'Escape') closePanel(); });
+  document.getElementById('backResults').onclick = showResults;
   async function search() {
     const term = q.value.trim();
-    if (!term) { results.innerHTML = ''; return; }
+    if (!term) { closePanel(); return; }
     let list = [];
     const bbox = Array.isArray(active.bbox) ? '&bbox=' + encodeURIComponent(active.bbox.join(',')) : '';
     const mapFile = active.file ? '&map=' + encodeURIComponent(active.file) : '';
-    try { list = await (await fetch('/api/maps/geocode?q=' + encodeURIComponent(term) + bbox + mapFile)).json(); } catch (e) {}
+    if (searchController) searchController.abort();
+    searchController = new AbortController();
+    try { list = await (await fetch('/api/maps/geocode?q=' + encodeURIComponent(term) + bbox + mapFile, { signal: searchController.signal })).json(); } catch (e) { if (e.name === 'AbortError') return; }
+    lastResults = Array.isArray(list) ? list : [];
     results.innerHTML = '';
-    if (!Array.isArray(list) || list.length === 0) {
+    sidePanel.hidden = false; showResults();
+    if (lastResults.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'no-results';
       empty.textContent = 'Sin resultados. Comprueba que el buscador offline esté instalado.';
       results.appendChild(empty);
       return;
     }
-    for (const r of (list || []).slice(0, 8)) {
+    for (const r of lastResults.slice(0, 8)) {
       const b = document.createElement('button');
-      b.innerHTML = '<b></b><small></small>';
-      b.querySelector('b').textContent = r.name;
-      b.querySelector('small').textContent = r.context || '';
+      b.innerHTML = '<span class="result-icon">&#9906;</span><span class="result-copy"><b></b><small></small></span><span></span>';
+      b.querySelector('b').textContent = displayAddress(r);
+      b.querySelector('small').textContent = r.context || kindLabel(r.kind);
       b.onclick = () => go(r);
       results.appendChild(b);
     }
   }
-  function go(r) {
+  async function go(r) {
     map.flyTo({ center: [r.lon, r.lat], zoom: Math.min(17, viewerMaxZoom) });
     if (marker) marker.remove();
     marker = new maplibregl.Marker({ color: '#7c6cf0' }).setLngLat([r.lon, r.lat]).addTo(map);
-    results.innerHTML = ''; q.value = r.name;
+    if (poiMarker) { poiMarker.remove(); poiMarker = null; }
+    q.value = displayAddress(r);
+    searchView.hidden = true; placeView.hidden = false; sidePanel.hidden = false;
+    document.getElementById('address').textContent = displayAddress(r);
+    document.getElementById('addressContext').textContent = [r.context, kindLabel(r.kind)].filter(Boolean).join(' · ');
+    document.getElementById('approx').hidden = !r.approximate;
+    nearby.innerHTML = '<div class="nearby-empty">Buscando lugares cercanos…</div>';
+    let list = [];
+    try { list = await (await fetch('/api/maps/nearby?lat=' + r.lat + '&lon=' + r.lon + '&map=' + encodeURIComponent(active.file))).json(); } catch (e) {}
+    renderNearby(Array.isArray(list) ? list : []);
   }
+  function displayAddress(r) { return r.name + (r.houseNumber ? ' ' + r.houseNumber : ''); }
+  function kindLabel(kind) { return String(kind || '').startsWith('street') ? 'Calle' : String(kind || '').startsWith('place') ? 'Localidad' : kind === 'postcode' ? 'Código postal' : ''; }
+  function showResults() { searchView.hidden = false; placeView.hidden = true; sidePanel.hidden = !q.value.trim(); }
+  function closePanel() { sidePanel.hidden = true; results.innerHTML = ''; lastResults = []; }
+  function renderNearby(list) {
+    nearby.innerHTML = '';
+    if (!list.length) { nearby.innerHTML = '<div class="nearby-empty">No hay puntos de interés cercanos en este mapa.</div>'; return; }
+    for (const p of list) {
+      const b = document.createElement('button'); b.className = 'nearby-item';
+      b.innerHTML = '<span class="nearby-icon"></span><span class="nearby-copy"><b></b><small></small></span><span class="distance"></span>';
+      b.querySelector('.nearby-icon').textContent = categoryIcon(p.category); b.querySelector('b').textContent = p.name;
+      b.querySelector('small').textContent = p.category; b.querySelector('.distance').textContent = distanceLabel(p.distance);
+      b.onclick = () => focusNearby(p); nearby.appendChild(b);
+    }
+  }
+  function focusNearby(p) {
+    map.flyTo({ center: [p.lon, p.lat], zoom: Math.min(18, viewerMaxZoom) });
+    if (poiMarker) poiMarker.remove();
+    poiMarker = new maplibregl.Marker({ color: '#23b68c', scale: .85 }).setLngLat([p.lon, p.lat]).setPopup(new maplibregl.Popup({ offset: 18 }).setText(p.name + ' · ' + p.category)).addTo(map).togglePopup();
+  }
+  function distanceLabel(m) { return m < 1000 ? m + ' m' : (m / 1000).toFixed(1).replace('.', ',') + ' km'; }
+  function categoryIcon(category) { return ({'Restaurante':'🍴','Cafetería':'☕','Bar':'●','Gasolinera':'⛽','Comercio':'▣','Salud':'✚','Alojamiento':'⌂','Aparcamiento':'P','Banco':'€','Transporte':'↔','Cultura y ocio':'★','Parque':'♧'})[category] || '•'; }
 })();
 </script>
 </body>
