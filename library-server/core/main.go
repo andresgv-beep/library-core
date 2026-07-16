@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log"
@@ -34,6 +35,7 @@ type Server struct {
 	store   *Store  // capa de gestión persistida (favoritos, notas, historial)
 	geo     *sql.DB // índice FTS5 de geocoding (plugin Maps); nil si no hay geo.db
 	geoPath string
+	mapsDir string
 	geoMu   sync.RWMutex
 
 	// Control de carga (§6, rate-limit v1): kiwixSem limita las peticiones
@@ -111,6 +113,23 @@ func main() {
 		if _, err := buildGeoNamesCitiesIndex(os.Args[2], os.Args[3]); err != nil {
 			log.Fatalf("buildgeonames: %v", err)
 		}
+		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "indexstreets" {
+		if len(os.Args) != 5 {
+			log.Fatal("uso: library-shim indexstreets <map.pmtiles> <streets.db> <geo.db>")
+		}
+		last := int64(-1)
+		count, err := buildStreetIndexFromPMTiles(context.Background(), os.Args[2], os.Args[3], os.Args[4], func(done, total, streets int64, zoom int) {
+			if done/1000 != last/1000 || done == total {
+				log.Printf("calles: %d/%d teselas, %d entradas, z%d", done, total, streets, zoom)
+				last = done
+			}
+		})
+		if err != nil {
+			log.Fatalf("indexstreets: %v", err)
+		}
+		log.Printf("calles: indice listo con %d entradas", count)
 		return
 	}
 
@@ -200,6 +219,7 @@ func main() {
 		store:         store,
 		geo:           geo,
 		geoPath:       geoPath,
+		mapsDir:       mapsDir,
 		kiwixSem:      make(chan struct{}, kiwixConc),
 		searchGate:    make(chan struct{}, searchConc),
 		searchCache:   newLRUCache(128, 10*time.Minute),
@@ -236,6 +256,8 @@ func main() {
 	adminMux.HandleFunc("/api/admin/maps/activate", mapAdmin.handleActivate)
 	adminMux.HandleFunc("/api/admin/maps/delete", mapAdmin.handleDelete)
 	adminMux.HandleFunc("/api/admin/maps/geocoder", mapAdmin.handleGeocoder)
+	adminMux.HandleFunc("/api/admin/maps/index", mapAdmin.handleStreetIndex)
+	adminMux.HandleFunc("/api/admin/maps/index/cancel", mapAdmin.handleStreetIndexCancel)
 	mux.HandleFunc("/api/maps/config", mapAdmin.handlePublicConfig)
 
 	// Motor de descargas (catálogo ZIM y descargas manuales del admin). DB propia

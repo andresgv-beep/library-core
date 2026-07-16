@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { getMaps, downloadMap, cancelMapDownload, activateMap, deleteMap, installMapGeocoder } from './api.js'
+  import { getMaps, downloadMap, cancelMapDownload, activateMap, deleteMap, installMapGeocoder, indexMapStreets, cancelMapStreetIndex } from './api.js'
   import { bytes } from './fmt.js'
 
   let data = $state({ catalog: [], installed: [], active: null, job: null, available: false, geocoder: { installed: false, job: null } })
@@ -13,6 +13,7 @@
   const regions = $derived((data.catalog || []).filter((r) => r.category === category))
   const downloading = $derived(data.job && ['starting', 'downloading'].includes(data.job.status))
   const geocoding = $derived(data.geocoder?.job && ['downloading', 'indexing'].includes(data.geocoder.job.status))
+  const streetIndexing = $derived(data.streetJob?.status === 'indexing')
 
   async function load() {
     try { data = await getMaps(); error = '' } catch (e) { error = e.message }
@@ -43,6 +44,11 @@
     busy = true
     try { await installMapGeocoder(); await load() } catch (e) { error = e.message } finally { busy = false }
   }
+  async function indexStreets(map) {
+    if (!confirm(`Indexar las calles de ${map.name}?\n\nSe procesa el mapa localmente. Puede tardar varios minutos, pero el servidor seguirá funcionando.`)) return
+    busy = true
+    try { await indexMapStreets(map.file); await load() } catch (e) { error = e.message } finally { busy = false }
+  }
 </script>
 
 <div class="toolbar">
@@ -53,6 +59,16 @@
 
 {#if !data.available}
   <div class="ccnote">El extractor PMTiles no está instalado junto al servidor. Reinstala el paquete todo-en-uno.</div>
+{/if}
+
+{#if streetIndexing}
+  <div class="mapjob">
+    <div><b>Indexando calles de {data.streetJob.name}</b><small>{data.streetJob.tiles || 0} / {data.streetJob.totalTiles || '…'} teselas · {data.streetJob.streets || 0} calles · z{data.streetJob.zoom || '…'}</small></div>
+    <span class="pspin"></span>
+    <button class="btn" onclick={cancelMapStreetIndex}>Cancelar</button>
+  </div>
+{:else if data.streetJob?.status === 'error'}
+  <div class="root-error">{data.streetJob.error || 'No se pudieron indexar las calles.'}</div>
 {/if}
 
 {#if downloading}
@@ -90,6 +106,11 @@
       <div class="cic">◈</div>
       <div><div class="cname">{map.name} {#if data.active?.file === map.file}<span class="badge b-signal">activo</span>{/if}</div><div class="cpath">{map.file} · zoom {map.maxZoom} · {bytes(map.bytes)}</div></div>
       <div class="actions">
+        {#if map.streetIndexed}
+          <span class="badge b-signal">calles indexadas · {bytes(map.streetBytes)}</span>
+        {:else}
+          <button class="btn" onclick={() => indexStreets(map)} disabled={busy || streetIndexing}>Indexar calles</button>
+        {/if}
         {#if data.active?.file !== map.file}<button class="btn" onclick={() => activate(map.file)} disabled={busy}>Activar</button>{/if}
         <button class="btn danger" onclick={() => remove(map.file)} disabled={busy}>Eliminar</button>
       </div>

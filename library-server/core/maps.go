@@ -374,16 +374,47 @@ func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bbox := parseGeoBBox(r.URL.Query().Get("bbox"))
+	mapFile := filepath.Base(strings.TrimSpace(r.URL.Query().Get("map")))
 	// Intento estricto (todos los tokens). Si no hay nada, reintento soltando el
 	// primer token (suele ser el genérico "carrer/calle/avinguda…" que puede no
 	// casar el idioma). Los números de portal ya se quitaron en geoTokens.
 	for start := 0; start < len(toks) && start < 2; start++ {
-		if hits := geoSearch(geo, matchExpr(toks[start:]), q, bbox); len(hits) > 0 {
+		match := matchExpr(toks[start:])
+		var hits []GeoHit
+		if mapFile != "" && mapFile == r.URL.Query().Get("map") {
+			streetPath := streetIndexPath(s.mapsDir, mapFile)
+			if st, statErr := os.Stat(streetPath); statErr == nil && st.Size() > 0 {
+				if streets, err := sql.Open("sqlite", streetPath); err == nil {
+					hits = append(hits, geoSearch(streets, match, q, bbox)...)
+					_ = streets.Close()
+				}
+			}
+		}
+		hits = appendUniqueGeoHits(hits, geoSearch(geo, match, q, bbox), 12)
+		if len(hits) > 0 {
 			writeJSON(w, http.StatusOK, hits)
 			return
 		}
 	}
 	writeJSON(w, http.StatusOK, []GeoHit{})
+}
+
+func appendUniqueGeoHits(dst, src []GeoHit, limit int) []GeoHit {
+	seen := make(map[string]bool, len(dst)+len(src))
+	for _, hit := range dst {
+		seen[strings.ToLower(hit.Name)+fmt.Sprintf("|%.4f|%.4f", hit.Lat, hit.Lon)] = true
+	}
+	for _, hit := range src {
+		key := strings.ToLower(hit.Name) + fmt.Sprintf("|%.4f|%.4f", hit.Lat, hit.Lon)
+		if !seen[key] {
+			seen[key] = true
+			dst = append(dst, hit)
+			if len(dst) >= limit {
+				break
+			}
+		}
+	}
+	return dst
 }
 
 // geoSearch: ejecuta la consulta FTS con el ranking Nimos (exacta > empieza-por >

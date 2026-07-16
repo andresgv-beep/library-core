@@ -67,13 +67,15 @@ var mapCatalog = []mapRegion{
 }
 
 type mapInstall struct {
-	File     string     `json:"file"`
-	RegionID string     `json:"regionId"`
-	Name     string     `json:"name"`
-	BBox     [4]float64 `json:"bbox"`
-	Center   [2]float64 `json:"center"`
-	MaxZoom  int        `json:"maxZoom"`
-	Bytes    int64      `json:"bytes"`
+	File          string     `json:"file"`
+	RegionID      string     `json:"regionId"`
+	Name          string     `json:"name"`
+	BBox          [4]float64 `json:"bbox"`
+	Center        [2]float64 `json:"center"`
+	MaxZoom       int        `json:"maxZoom"`
+	Bytes         int64      `json:"bytes"`
+	StreetIndexed bool       `json:"streetIndexed"`
+	StreetBytes   int64      `json:"streetBytes,omitempty"`
 }
 
 type mapState struct {
@@ -99,12 +101,25 @@ type geoIndexJob struct {
 	partPath string
 }
 
+type streetIndexJob struct {
+	File       string `json:"file"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Tiles      int64  `json:"tiles"`
+	TotalTiles int64  `json:"totalTiles"`
+	Streets    int64  `json:"streets"`
+	Zoom       int    `json:"zoom"`
+	Error      string `json:"error,omitempty"`
+}
+
 type mapManager struct {
 	root, tool, source string
 	geoPath, geoSource string
 	mu                 sync.Mutex
 	job                *mapJob
 	geoJob             *geoIndexJob
+	streetJob          *streetIndexJob
+	streetCancel       context.CancelFunc
 	cancel             context.CancelFunc
 }
 
@@ -153,6 +168,11 @@ func (m *mapManager) handleList(w http.ResponseWriter, r *http.Request) {
 		}
 		geoJob = &copyGeo
 	}
+	streetJob := m.streetJob
+	if streetJob != nil {
+		copyStreet := *streetJob
+		streetJob = &copyStreet
+	}
 	m.mu.Unlock()
 	state, _ := m.loadState()
 	geoInstalled, geoBytes := false, int64(0)
@@ -162,7 +182,8 @@ func (m *mapManager) handleList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"catalog": mapCatalog, "installed": m.installed(), "active": state.Active,
 		"job": job, "available": m.tool != "",
-		"geocoder": map[string]any{"installed": geoInstalled, "bytes": geoBytes, "job": geoJob},
+		"geocoder":  map[string]any{"installed": geoInstalled, "bytes": geoBytes, "job": geoJob},
+		"streetJob": streetJob,
 	})
 }
 
@@ -374,6 +395,7 @@ func (m *mapManager) handleDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	_ = os.Remove(streetIndexPath(m.root, input.File))
 	state, _ := m.loadState()
 	if state.Active != nil && state.Active.File == input.File {
 		state.Active = nil
@@ -392,7 +414,7 @@ func (m *mapManager) handlePublicConfig(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no hay mapa activo"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"name": state.Active.Name, "url": "/mapdata/" + state.Active.File, "bbox": state.Active.BBox, "center": state.Active.Center, "maxZoom": state.Active.MaxZoom})
+	writeJSON(w, http.StatusOK, map[string]any{"name": state.Active.Name, "file": state.Active.File, "url": "/mapdata/" + state.Active.File, "bbox": state.Active.BBox, "center": state.Active.Center, "maxZoom": state.Active.MaxZoom})
 }
 
 func (m *mapManager) installed() []mapInstall {
@@ -404,7 +426,11 @@ func (m *mapManager) installed() []mapInstall {
 		}
 		st, err := entry.Info()
 		if err == nil {
-			result = append(result, installForFile(entry.Name(), st))
+			install := installForFile(entry.Name(), st)
+			if streets, streetErr := os.Stat(streetIndexPath(m.root, entry.Name())); streetErr == nil {
+				install.StreetIndexed, install.StreetBytes = true, streets.Size()
+			}
+			result = append(result, install)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
