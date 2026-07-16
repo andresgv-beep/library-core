@@ -48,6 +48,8 @@ export const activateMap = (file) =>
   getJSON('/api/admin/maps/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }) })
 export const deleteMap = (file) =>
   getJSON('/api/admin/maps/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }) })
+export const installMapGeocoder = () =>
+  getJSON('/api/admin/maps/geocoder', { method: 'POST' })
 
 // ── Auth / usuarios ──
 export const authMe = () => getJSON('/api/auth/me').catch(() => ({ setupNeeded: false, user: null }))

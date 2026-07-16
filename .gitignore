@@ -10,6 +10,11 @@ library-server/data/
 *.db-wal
 .env
 
+# cache de compilación de Go (se regenera; nunca al repo)
+**/.gocache/
+# carpetas temporales de trabajo
+**/.tmp-*/
+
 # artefactos de datos del motor (nunca al repo; se regeneran)
 **/*.zim
 **/*.tix

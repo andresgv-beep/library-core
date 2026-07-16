@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,12 +27,14 @@ import (
 
 // Server mantiene la conexión con el motor y la config del shim.
 type Server struct {
-	kiwix *url.URL
-	proxy *httputil.ReverseProxy
-	http  *http.Client
-	token string  // token de sesión NimOS. Vacío = auth desactivada (dev LAN).
-	store *Store  // capa de gestión persistida (favoritos, notas, historial)
-	geo   *sql.DB // índice FTS5 de geocoding (plugin Maps); nil si no hay geo.db
+	kiwix   *url.URL
+	proxy   *httputil.ReverseProxy
+	http    *http.Client
+	token   string  // token de sesión NimOS. Vacío = auth desactivada (dev LAN).
+	store   *Store  // capa de gestión persistida (favoritos, notas, historial)
+	geo     *sql.DB // índice FTS5 de geocoding (plugin Maps); nil si no hay geo.db
+	geoPath string
+	geoMu   sync.RWMutex
 
 	// Control de carga (§6, rate-limit v1): kiwixSem limita las peticiones
 	// simultáneas al motor; searchGate limita búsquedas globales concurrentes
@@ -98,6 +101,15 @@ func main() {
 		}
 		if err := buildGeoIndex(os.Args[2], os.Args[3], geonames, prefixes); err != nil {
 			log.Fatalf("buildgeo: %v", err)
+		}
+		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "buildgeonames" {
+		if len(os.Args) != 4 {
+			log.Fatal("uso: library-shim buildgeonames <cities500.zip> <geo.db>")
+		}
+		if _, err := buildGeoNamesCitiesIndex(os.Args[2], os.Args[3]); err != nil {
+			log.Fatalf("buildgeonames: %v", err)
 		}
 		return
 	}
@@ -187,6 +199,7 @@ func main() {
 		token:         token,
 		store:         store,
 		geo:           geo,
+		geoPath:       geoPath,
 		kiwixSem:      make(chan struct{}, kiwixConc),
 		searchGate:    make(chan struct{}, searchConc),
 		searchCache:   newLRUCache(128, 10*time.Minute),
@@ -216,12 +229,13 @@ func main() {
 	// protegida sin tener que acordarse de nada.
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("/api/admin/service", s.handleServiceControl)
-	mapAdmin := newMapManager(mapsDir)
+	mapAdmin := newMapManager(mapsDir, geoPath)
 	adminMux.HandleFunc("/api/admin/maps", mapAdmin.handleList)
 	adminMux.HandleFunc("/api/admin/maps/download", mapAdmin.handleDownload)
 	adminMux.HandleFunc("/api/admin/maps/cancel", mapAdmin.handleCancel)
 	adminMux.HandleFunc("/api/admin/maps/activate", mapAdmin.handleActivate)
 	adminMux.HandleFunc("/api/admin/maps/delete", mapAdmin.handleDelete)
+	adminMux.HandleFunc("/api/admin/maps/geocoder", mapAdmin.handleGeocoder)
 	mux.HandleFunc("/api/maps/config", mapAdmin.handlePublicConfig)
 
 	// Motor de descargas (catálogo ZIM y descargas manuales del admin). DB propia

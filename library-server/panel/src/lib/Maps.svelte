@@ -1,9 +1,9 @@
 <script>
   import { onMount } from 'svelte'
-  import { getMaps, downloadMap, cancelMapDownload, activateMap, deleteMap } from './api.js'
+  import { getMaps, downloadMap, cancelMapDownload, activateMap, deleteMap, installMapGeocoder } from './api.js'
   import { bytes } from './fmt.js'
 
-  let data = $state({ catalog: [], installed: [], active: null, job: null, available: false })
+  let data = $state({ catalog: [], installed: [], active: null, job: null, available: false, geocoder: { installed: false, job: null } })
   let category = $state('Europa')
   let detail = $state(13)
   let busy = $state(false)
@@ -12,6 +12,7 @@
   const categories = $derived([...new Set((data.catalog || []).map((r) => r.category))])
   const regions = $derived((data.catalog || []).filter((r) => r.category === category))
   const downloading = $derived(data.job && ['starting', 'downloading'].includes(data.job.status))
+  const geocoding = $derived(data.geocoder?.job && ['downloading', 'indexing'].includes(data.geocoder.job.status))
 
   async function load() {
     try { data = await getMaps(); error = '' } catch (e) { error = e.message }
@@ -38,6 +39,10 @@
     busy = true
     try { await deleteMap(file); await load() } catch (e) { error = e.message } finally { busy = false }
   }
+  async function installGeocoder() {
+    busy = true
+    try { await installMapGeocoder(); await load() } catch (e) { error = e.message } finally { busy = false }
+  }
 </script>
 
 <div class="toolbar">
@@ -59,6 +64,24 @@
 {:else if data.job?.status === 'error'}
   <div class="root-error">{data.job.error || 'No se pudo descargar el mapa.'}</div>
 {/if}
+
+<div class="geocoder" class:ready={data.geocoder?.installed}>
+  <div class="cic">⌕</div>
+  <div>
+    <b>Buscador de lugares offline</b>
+    {#if data.geocoder?.installed}
+      <small>Activo · ciudades y localidades de todo el mundo · {bytes(data.geocoder.bytes)}</small>
+    {:else if geocoding}
+      <small>{data.geocoder.job.status === 'indexing' ? 'Creando índice…' : `Descargando… ${bytes(data.geocoder.job.bytes)}`}</small>
+    {:else if data.geocoder?.job?.status === 'error'}
+      <small class="geoerr">{data.geocoder.job.error}</small>
+    {:else}
+      <small>Necesario para buscar Barcelona, Madrid, Tokio y otras localidades.</small>
+    {/if}
+  </div>
+  {#if !data.geocoder?.installed && !geocoding}<button class="btn" onclick={installGeocoder} disabled={busy}>Instalar buscador</button>{/if}
+  {#if geocoding}<span class="pspin"></span>{/if}
+</div>
 
 <div class="label">Mapas instalados</div>
 {#if data.installed?.length}
@@ -101,6 +124,7 @@
   .pspin{width:16px;height:16px;border:2px solid var(--line-bright);border-top-color:var(--info);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
   .installed{grid-template-columns:40px 1fr auto}.installed .cic{color:var(--signal);background:var(--signal-dim)}.actions{display:flex;gap:7px}.danger{color:var(--crit);border-color:var(--crit-border)}
   .compact{padding:22px}.catalog-label{margin-top:20px}.detail{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:13px;color:var(--ink-faint);font-size:11.5px}.detail span{margin-right:4px}
+  .geocoder{display:grid;grid-template-columns:40px 1fr auto;align-items:center;gap:10px;margin-bottom:16px;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:var(--canvas)}.geocoder.ready{border-color:var(--signal-border);background:var(--signal-soft)}.geocoder .cic{color:var(--signal);background:var(--signal-dim)}.geocoder b,.geocoder small{display:block}.geocoder b{font-size:13px}.geocoder small{margin-top:3px;color:var(--ink-mute);font-size:11px}.geocoder .geoerr{color:var(--crit)}
   .region-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.region{display:flex;align-items:center;gap:11px;padding:12px 13px;text-align:left;border:1px solid var(--line);border-radius:9px;background:var(--canvas)}.region:hover:not(:disabled){border-color:var(--signal-border);background:var(--signal-soft)}.region:disabled{opacity:.45;cursor:not-allowed}.region span:nth-child(2){flex:1}.region b{display:block;font-size:13px}.region small{display:block;margin-top:2px;color:var(--ink-faint);font-size:11px}.rglyph{color:var(--signal)}.arrow{color:var(--ink-faint);font-size:17px}
   .root-error{margin-top:12px;padding:9px 11px;border:1px solid var(--crit-border);border-radius:7px;background:var(--crit-dim);color:var(--crit);font-size:12px}
   @media(max-width:720px){.region-grid{grid-template-columns:1fr}}

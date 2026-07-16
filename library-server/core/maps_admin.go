@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 )
 
 const defaultMapSource = "https://data.source.coop/protomaps/openstreetmap/v4.pmtiles"
+const defaultGeoNamesSource = "https://download.geonames.org/export/dump/cities500.zip"
 
 type mapRegion struct {
 	ID       string     `json:"id"`
@@ -89,15 +91,29 @@ type mapJob struct {
 	partPath string
 }
 
+type geoIndexJob struct {
+	Status   string `json:"status"`
+	Bytes    int64  `json:"bytes"`
+	Entries  int    `json:"entries,omitempty"`
+	Error    string `json:"error,omitempty"`
+	partPath string
+}
+
 type mapManager struct {
 	root, tool, source string
+	geoPath, geoSource string
 	mu                 sync.Mutex
 	job                *mapJob
+	geoJob             *geoIndexJob
 	cancel             context.CancelFunc
 }
 
-func newMapManager(root string) *mapManager {
-	return &mapManager{root: root, tool: findMapTool(), source: env("MAP_SOURCE_URL", defaultMapSource)}
+func newMapManager(root, geoPath string) *mapManager {
+	return &mapManager{
+		root: root, geoPath: geoPath, tool: findMapTool(),
+		source:    env("MAP_SOURCE_URL", defaultMapSource),
+		geoSource: env("MAP_GEONAMES_URL", defaultGeoNamesSource),
+	}
 }
 
 func findMapTool() string {
@@ -127,9 +143,27 @@ func (m *mapManager) handleList(w http.ResponseWriter, r *http.Request) {
 		}
 		job = &copyJob
 	}
+	geoJob := m.geoJob
+	if geoJob != nil {
+		copyGeo := *geoJob
+		if geoJob.partPath != "" {
+			if st, err := os.Stat(geoJob.partPath); err == nil {
+				copyGeo.Bytes = st.Size()
+			}
+		}
+		geoJob = &copyGeo
+	}
 	m.mu.Unlock()
 	state, _ := m.loadState()
-	writeJSON(w, http.StatusOK, map[string]any{"catalog": mapCatalog, "installed": m.installed(), "active": state.Active, "job": job, "available": m.tool != ""})
+	geoInstalled, geoBytes := false, int64(0)
+	if st, err := os.Stat(m.geoPath); err == nil && !st.IsDir() {
+		geoInstalled, geoBytes = true, st.Size()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"catalog": mapCatalog, "installed": m.installed(), "active": state.Active,
+		"job": job, "available": m.tool != "",
+		"geocoder": map[string]any{"installed": geoInstalled, "bytes": geoBytes, "job": geoJob},
+	})
 }
 
 func (m *mapManager) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +205,88 @@ func (m *mapManager) handleDownload(w http.ResponseWriter, r *http.Request) {
 	m.job = &mapJob{RegionID: region.ID, Name: region.Name, File: file, Status: "starting", MaxZoom: input.MaxZoom, partPath: part}
 	m.mu.Unlock()
 	go m.extract(ctx, region, input.MaxZoom, file, part)
+	// El primer mapa instala también el buscador mundial ligero. Son unos
+	// 12 MB comprimidos y queda compartido por todos los mapas.
+	_ = m.startGeocoder()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "descarga iniciada"})
+}
+
+func (m *mapManager) handleGeocoder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "solo POST"})
+		return
+	}
+	if err := m.startGeocoder(); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "indice iniciado"})
+}
+
+func (m *mapManager) startGeocoder() error {
+	if _, err := os.Stat(m.geoPath); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(m.geoPath), 0o755); err != nil {
+		return err
+	}
+	part := filepath.Join(filepath.Dir(m.geoPath), "cities500.zip.part")
+	m.mu.Lock()
+	if m.geoJob != nil && (m.geoJob.Status == "downloading" || m.geoJob.Status == "indexing") {
+		m.mu.Unlock()
+		return nil
+	}
+	m.geoJob = &geoIndexJob{Status: "downloading", partPath: part}
+	m.mu.Unlock()
+	go m.downloadGeocoder(part)
+	return nil
+}
+
+func (m *mapManager) downloadGeocoder(part string) {
+	_ = os.Remove(part)
+	resp, err := http.Get(m.geoSource)
+	if err == nil && resp.StatusCode != http.StatusOK {
+		err = fmt.Errorf("GeoNames: HTTP %d", resp.StatusCode)
+	}
+	if err == nil {
+		var f *os.File
+		f, err = os.Create(part)
+		if err == nil {
+			_, err = io.Copy(f, resp.Body)
+			if closeErr := f.Close(); err == nil {
+				err = closeErr
+			}
+		}
+	}
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		m.finishGeoError(err, part)
+		return
+	}
+	m.mu.Lock()
+	m.geoJob.Status = "indexing"
+	m.mu.Unlock()
+	entries, err := buildGeoNamesCitiesIndex(part, m.geoPath)
+	if err != nil {
+		m.finishGeoError(err, part)
+		return
+	}
+	_ = os.Remove(part)
+	m.mu.Lock()
+	m.geoJob.Status, m.geoJob.Entries, m.geoJob.partPath = "done", entries, ""
+	if st, statErr := os.Stat(m.geoPath); statErr == nil {
+		m.geoJob.Bytes = st.Size()
+	}
+	m.mu.Unlock()
+}
+
+func (m *mapManager) finishGeoError(err error, part string) {
+	_ = os.Remove(part)
+	m.mu.Lock()
+	m.geoJob.Status, m.geoJob.Error, m.geoJob.partPath = "error", err.Error(), ""
+	m.mu.Unlock()
 }
 
 func (m *mapManager) extract(ctx context.Context, region mapRegion, maxZoom int, file, part string) {

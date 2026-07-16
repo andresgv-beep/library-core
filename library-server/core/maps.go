@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bufio"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -8,10 +10,114 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 )
+
+// buildGeoNamesCitiesIndex crea el buscador base mundial que acompaña a los
+// mapas. Incluye ciudades, pueblos y sedes administrativas de cities500.
+// Se construye a un .new y se publica al final: nunca deja un geo.db a medias.
+func buildGeoNamesCitiesIndex(zipPath, dbPath string) (int, error) {
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return 0, err
+	}
+	defer zr.Close()
+	var src *zip.File
+	for _, f := range zr.File {
+		if strings.EqualFold(filepath.Base(f.Name), "cities500.txt") {
+			src = f
+			break
+		}
+	}
+	if src == nil {
+		return 0, fmt.Errorf("cities500.txt no encontrado en el ZIP")
+	}
+	r, err := src.Open()
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return 0, err
+	}
+	tmp := dbPath + ".new"
+	_ = os.Remove(tmp)
+	db, err := sql.Open("sqlite", tmp)
+	if err != nil {
+		return 0, err
+	}
+	cleanup := func() { _ = db.Close(); _ = os.Remove(tmp) }
+	if _, err = db.Exec(`PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY;
+		CREATE VIRTUAL TABLE geo USING fts5(
+		name, kind UNINDEXED, lat UNINDEXED, lon UNINDEXED, context, display UNINDEXED,
+		tokenize='unicode61 remove_diacritics 2');`); err != nil {
+		cleanup()
+		return 0, err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		cleanup()
+		return 0, err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO geo(name, kind, lat, lon, context, display) VALUES(?,?,?,?,?,?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		cleanup()
+		return 0, err
+	}
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
+	count := 0
+	for scanner.Scan() {
+		c := strings.Split(scanner.Text(), "\t")
+		if len(c) < 15 || c[1] == "" {
+			continue
+		}
+		lat, err1 := strconv.ParseFloat(c[4], 64)
+		lon, err2 := strconv.ParseFloat(c[5], 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		// El nombre ASCII y el país también se indexan, sin llenar la lista
+		// visual con la enorme columna de nombres alternativos.
+		context := strings.TrimSpace(c[2] + " " + c[8])
+		display := c[8]
+		if _, err = stmt.Exec(c[1], "place:"+strings.ToLower(c[7]), lat, lon, context, display); err != nil {
+			_ = stmt.Close()
+			_ = tx.Rollback()
+			cleanup()
+			return 0, err
+		}
+		count++
+	}
+	if err = scanner.Err(); err == nil {
+		err = stmt.Close()
+	}
+	if err == nil {
+		err = tx.Commit()
+	} else {
+		_ = tx.Rollback()
+	}
+	if err != nil {
+		cleanup()
+		return 0, err
+	}
+	if err = db.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return 0, err
+	}
+	_ = os.Remove(dbPath)
+	if err = os.Rename(tmp, dbPath); err != nil {
+		_ = os.Remove(tmp)
+		return 0, err
+	}
+	log.Printf("geo index: %d localidades mundiales -> %s", count, dbPath)
+	return count, nil
+}
 
 // Plugin Maps — geocoder offline. Índice SQLite FTS5 de calles/lugares (sacados de
 // OSM vía Overpass) con nuestro ranking. Mismo patrón "capa Nimos" que la búsqueda
@@ -252,7 +358,12 @@ type GeoHit struct {
 
 func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if q == "" || s.geo == nil {
+	if q == "" {
+		writeJSON(w, http.StatusOK, []GeoHit{})
+		return
+	}
+	geo := s.geocoder()
+	if geo == nil {
 		writeJSON(w, http.StatusOK, []GeoHit{})
 		return
 	}
@@ -265,7 +376,7 @@ func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
 	// primer token (suele ser el genérico "carrer/calle/avinguda…" que puede no
 	// casar el idioma). Los números de portal ya se quitaron en geoTokens.
 	for start := 0; start < len(toks) && start < 2; start++ {
-		if hits := s.geoSearch(matchExpr(toks[start:]), q); len(hits) > 0 {
+		if hits := geoSearch(geo, matchExpr(toks[start:]), q); len(hits) > 0 {
 			writeJSON(w, http.StatusOK, hits)
 			return
 		}
@@ -275,8 +386,36 @@ func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
 
 // geoSearch: ejecuta la consulta FTS con el ranking Nimos (exacta > empieza-por >
 // bm25; a igualdad, lugares antes que calles).
-func (s *Server) geoSearch(match, raw string) []GeoHit {
-	rows, err := s.geo.Query(`
+func (s *Server) geocoder() *sql.DB {
+	s.geoMu.RLock()
+	geo := s.geo
+	s.geoMu.RUnlock()
+	if geo != nil || s.geoPath == "" {
+		return geo
+	}
+	s.geoMu.Lock()
+	defer s.geoMu.Unlock()
+	if s.geo != nil {
+		return s.geo
+	}
+	if _, err := os.Stat(s.geoPath); err != nil {
+		return nil
+	}
+	db, err := sql.Open("sqlite", s.geoPath)
+	if err != nil {
+		return nil
+	}
+	if err = db.Ping(); err != nil {
+		_ = db.Close()
+		return nil
+	}
+	s.geo = db
+	log.Printf("maps: geocoder activado en caliente (%s)", s.geoPath)
+	return db
+}
+
+func geoSearch(db *sql.DB, match, raw string) []GeoHit {
+	rows, err := db.Query(`
 		SELECT name, kind, lat, lon, context, display
 		FROM geo WHERE geo MATCH ?
 		ORDER BY

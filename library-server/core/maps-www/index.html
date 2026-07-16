@@ -27,6 +27,7 @@
   #results button:hover{background:#1c1c25}
   #results button b{font-size:14px;font-weight:550}
   #results button small{font-size:12px;color:var(--muted)}
+  #results .no-results{padding:11px 14px;color:var(--muted);font-size:12px;line-height:1.4}
   .hint{position:absolute;bottom:12px;left:16px;z-index:10;font-size:11.5px;color:var(--muted);background:rgba(17,17,23,.8);padding:5px 10px;border-radius:8px}
 </style>
 </head>
@@ -67,7 +68,7 @@
     glyphs: '/maps/fonts/{fontstack}/{range}.pbf',   // vendorizado (offline)
     sprite: '/maps/sprites/' + flavor,                // vendorizado (offline)
     sources: {
-      protomaps: { type: 'vector', url: 'pmtiles://' + location.origin + active.url, attribution: '© OpenStreetMap · Protomaps' }
+      protomaps: { type: 'vector', url: 'pmtiles://' + location.origin + active.url, attribution: '© OpenStreetMap · Protomaps · <a href="https://www.geonames.org/">GeoNames</a>' }
     },
     layers
   };
@@ -90,6 +91,13 @@
     let list = [];
     try { list = await (await fetch('/api/maps/geocode?q=' + encodeURIComponent(term))).json(); } catch (e) {}
     results.innerHTML = '';
+    if (!Array.isArray(list) || list.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'no-results';
+      empty.textContent = 'Sin resultados. Comprueba que el buscador offline esté instalado.';
+      results.appendChild(empty);
+      return;
+    }
     for (const r of (list || []).slice(0, 8)) {
       const b = document.createElement('button');
       b.innerHTML = '<b></b><small></small>';
