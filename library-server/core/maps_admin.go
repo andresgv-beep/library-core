@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/paulmach/orb/encoding/mvt"
 )
 
 const defaultMapSource = "https://data.source.coop/protomaps/openstreetmap/v4.pmtiles"
@@ -415,6 +417,78 @@ func (m *mapManager) handlePublicConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": state.Active.Name, "file": state.Active.File, "url": "/mapdata/" + state.Active.File, "bbox": state.Active.BBox, "center": state.Active.Center, "maxZoom": state.Active.MaxZoom})
+}
+
+func (m *mapManager) handlePublicTile(w http.ResponseWriter, r *http.Request) {
+	const prefix = "/api/maps/tiles/"
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, prefix), "/")
+	if r.Method != http.MethodGet || len(parts) != 4 {
+		http.NotFound(w, r)
+		return
+	}
+	file := parts[0]
+	if file == "" || filepath.Base(file) != file || !strings.HasSuffix(strings.ToLower(file), ".pmtiles") {
+		http.NotFound(w, r)
+		return
+	}
+	z64, errZ := strconv.ParseUint(parts[1], 10, 8)
+	x64, errX := strconv.ParseUint(parts[2], 10, 32)
+	y64, errY := strconv.ParseUint(strings.TrimSuffix(parts[3], ".mvt"), 10, 32)
+	if errZ != nil || errX != nil || errY != nil || !strings.HasSuffix(parts[3], ".mvt") {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(filepath.Join(m.root, file))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	headerBytes := make([]byte, pmHeaderLen)
+	if _, err = io.ReadFull(f, headerBytes); err != nil {
+		http.Error(w, "mapa no valido", http.StatusInternalServerError)
+		return
+	}
+	header, err := readPMHeader(headerBytes)
+	if err != nil || header.tileType != pmMVT {
+		http.Error(w, "mapa no compatible", http.StatusInternalServerError)
+		return
+	}
+	tile, found, err := readPMTile(f, header, uint8(z64), uint32(x64), uint32(y64))
+	if err != nil {
+		http.Error(w, "no se pudo leer la tesela", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// Planetiler puede producir geometrías perfectamente recuperables pero que
+	// ciertos decodificadores WebGL descartan completas. Pasarlas por el lector
+	// MVT de Core normaliza comandos y anillos antes de entregarlas al cliente.
+	layers, err := mvt.Unmarshal(tile)
+	if err != nil {
+		http.Error(w, "tesela vectorial no valida", http.StatusInternalServerError)
+		return
+	}
+	normalized := layers[:0]
+	for _, layer := range layers {
+		// Los centros urbanos pueden superar 300 POI por tesela. WebView2 deja
+		// de dibujar el tile entero al construir tantos símbolos; Planetiler los
+		// ordena por prioridad, así que conservamos los 160 más relevantes.
+		if layer.Name == "pois" && len(layer.Features) > 160 {
+			layer.Features = layer.Features[:160]
+		}
+		normalized = append(normalized, layer)
+	}
+	tile, err = mvt.Marshal(normalized)
+	if err != nil {
+		http.Error(w, "no se pudo normalizar la tesela", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(tile)
 }
 
 func (m *mapManager) installed() []mapInstall {

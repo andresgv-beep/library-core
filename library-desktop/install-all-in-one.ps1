@@ -39,8 +39,12 @@ foreach ($required in @($SourceSupervisor, $SourceClient, $SourcePanel)) {
 # Actualizacion segura: detener el servicio instalado y esperar a que Windows
 # libere el ejecutable antes de sustituir binarios.
 if (Test-Path -LiteralPath $Supervisor) {
-  & $Supervisor stop
-  if ($LASTEXITCODE -ne 0) { throw 'No se pudo detener Library Server para actualizarlo.' }
+  $service = Get-Service -Name 'NimosLibraryServer' -ErrorAction SilentlyContinue
+  if ($service -and $service.Status -ne 'Stopped') {
+    & $Supervisor stop
+    $service.Refresh()
+    if ($LASTEXITCODE -ne 0 -and $service.Status -ne 'Stopped') { throw 'No se pudo detener Library Server para actualizarlo.' }
+  }
   $deadline = (Get-Date).AddSeconds(30)
   do {
     $service = Get-Service -Name 'NimosLibraryServer' -ErrorAction SilentlyContinue

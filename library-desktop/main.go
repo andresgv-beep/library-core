@@ -39,7 +39,7 @@ func main() {
 		MinHeight: minHeight,
 		// Sin marco del SO: la SPA dibuja su propia barra (arrastre vía
 		// --wails-draggable) y sus controles min/max/cerrar (window.runtime).
-		Frameless:  true,
+		Frameless: true,
 		OnStartup:  sh.onStartup,
 		OnShutdown: sh.onShutdown,
 		// AssetServer.Handler recibe TODAS las peticiones de la webview: splash

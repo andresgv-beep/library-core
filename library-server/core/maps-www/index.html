@@ -64,16 +64,30 @@
   document.body.dataset.flavor = flavor;
   const layers = await (await fetch('/maps/style-' + flavor + '.json')).json();
   const archiveMaxZoom = Math.max(0, Number(active.maxZoom) || 13);
+  // Algunas teselas urbanas z15 de Protomaps son demasiado complejas para el
+  // decodificador WebGL de WebView2 (Barcelona supera medio MB comprimida) y
+  // dejan un rectángulo gris. z14 conserva el detalle viario y es estable; se
+  // amplía después en el visor sin solicitar esas teselas problemáticas.
+  const renderMaxZoom = Math.min(14, archiveMaxZoom);
   const style = {
     version: 8,
     glyphs: '/maps/fonts/{fontstack}/{range}.pbf',   // vendorizado (offline)
     sprite: '/maps/sprites/' + flavor,                // vendorizado (offline)
     sources: {
-      protomaps: { type: 'vector', url: 'pmtiles://' + location.origin + active.url, maxzoom: archiveMaxZoom, attribution: '© OpenStreetMap · Protomaps · <a href="https://www.geonames.org/">GeoNames</a>' }
+      // Core extrae cada tesela del PMTiles local. Evitamos rangos aleatorios
+      // de varios GB en WebView2 y el mismo endpoint sirve a toda la LAN.
+      protomaps: { type: 'vector', tiles: [location.origin + '/api/maps/tiles/' + encodeURIComponent(active.file) + '/{z}/{x}/{y}.mvt?v=9'], minzoom: 0, maxzoom: renderMaxZoom, attribution: '© OpenStreetMap · Protomaps · <a href="https://www.geonames.org/">GeoNames</a>' }
     },
     layers
   };
-  const map = new maplibregl.Map({ container: 'map', style, center: active.center || [0, 20], zoom: Math.min(7, archiveMaxZoom), maxZoom: archiveMaxZoom, hash: true, attributionControl: false });
+  // Las teselas terminan en renderMaxZoom, pero MapLibre puede ampliarlas de
+  // forma segura. Así el usuario llega a nivel de calle sin huecos.
+  const viewerMaxZoom = Math.min(20, renderMaxZoom + 5);
+  const map = new maplibregl.Map({
+    container: 'map', style, center: active.center || [0, 20],
+    zoom: Math.min(7, archiveMaxZoom), maxZoom: viewerMaxZoom,
+    hash: true, attributionControl: false
+  });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
   window._map = map;
@@ -111,7 +125,7 @@
     }
   }
   function go(r) {
-    map.flyTo({ center: [r.lon, r.lat], zoom: Math.min(16.5, archiveMaxZoom) });
+    map.flyTo({ center: [r.lon, r.lat], zoom: Math.min(17, viewerMaxZoom) });
     if (marker) marker.remove();
     marker = new maplibregl.Marker({ color: '#7c6cf0' }).setLngLat([r.lon, r.lat]).addTo(map);
     results.innerHTML = ''; q.value = r.name;

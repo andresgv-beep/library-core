@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"sort"
 )
 
 const pmHeaderLen = 127
@@ -133,6 +134,59 @@ func iteratePMEntries(r io.ReaderAt, h pmHeader, operation func(pmEntry) error) 
 	return walk(h.rootOffset, h.rootLength, 0)
 }
 
+// readPMTile busca y devuelve una tesela descomprimida. Mantener esta lectura
+// en Core evita que cada WebView/navegador tenga que resolver rangos dentro de
+// archivos PMTiles de varios GB.
+func readPMTile(r io.ReaderAt, h pmHeader, z uint8, x, y uint32) ([]byte, bool, error) {
+	if z > h.maxZoom || x >= uint32(1)<<z || y >= uint32(1)<<z {
+		return nil, false, nil
+	}
+	id := pmZxyToID(z, x, y)
+	offset, length := h.rootOffset, h.rootLength
+	for depth := 0; depth < 5; depth++ {
+		entries, err := readPMDirectory(r, offset, length, h.internalCompression)
+		if err != nil {
+			return nil, false, err
+		}
+		i := sort.Search(len(entries), func(i int) bool { return entries[i].tileID > id }) - 1
+		if i < 0 {
+			return nil, false, nil
+		}
+		entry := entries[i]
+		if entry.run == 0 {
+			offset, length = h.leafOffset+entry.offset, uint64(entry.length)
+			continue
+		}
+		if id >= entry.tileID+uint64(entry.run) {
+			return nil, false, nil
+		}
+		data := make([]byte, entry.length)
+		if _, err := r.ReadAt(data, int64(h.tileOffset+entry.offset)); err != nil {
+			return nil, false, err
+		}
+		if h.tileCompression == pmNone {
+			return data, true, nil
+		}
+		if h.tileCompression != pmGzip {
+			return nil, false, fmt.Errorf("compresion de tesela PMTiles no compatible")
+		}
+		gz, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, false, err
+		}
+		plain, err := io.ReadAll(gz)
+		closeErr := gz.Close()
+		if err != nil {
+			return nil, false, err
+		}
+		if closeErr != nil {
+			return nil, false, closeErr
+		}
+		return plain, true, nil
+	}
+	return nil, false, fmt.Errorf("directorio PMTiles demasiado profundo")
+}
+
 func pmRotate(n, x, y, rx, ry uint32) (uint32, uint32) {
 	if ry == 0 {
 		if rx != 0 {
@@ -158,4 +212,23 @@ func pmIDToZxy(id uint64) (uint8, uint32, uint32) {
 		t >>= 2
 	}
 	return z, x, y
+}
+
+func pmZxyToID(z uint8, x, y uint32) uint64 {
+	if z == 0 {
+		return 0
+	}
+	var d uint64
+	for s := uint32(1) << (z - 1); s > 0; s >>= 1 {
+		var rx, ry uint32
+		if x&s != 0 {
+			rx = 1
+		}
+		if y&s != 0 {
+			ry = 1
+		}
+		d += uint64(s) * uint64(s) * uint64((3*rx)^ry)
+		x, y = pmRotate(s, x, y, rx, ry)
+	}
+	return (uint64(1)<<(2*z)-1)/3 + d
 }
