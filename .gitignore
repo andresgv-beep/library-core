@@ -17,3 +17,5 @@ library-server/data/
 **/*.zim.meta
 library-server/core/www-client/
 library-desktop/bin/
+library-server/release/
+.cache/

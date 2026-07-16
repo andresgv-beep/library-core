@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { authMe, authLogout, getHealth } from './lib/api.js'
+  import { authMe, authLogout, getHealth, getServiceStatus, restartLibraryServer } from './lib/api.js'
   import Login from './lib/Login.svelte'
   import Storage from './lib/Storage.svelte'
   import Collections from './lib/Collections.svelte'
@@ -12,6 +12,8 @@
   let health = $state({ shim: '…', engine: '…' })
   let me = $state(null) // {setupNeeded, user}
   let loading = $state(true)
+  let service = $state({ supervised: false })
+  let restarting = $state(false)
 
   const TABS = [
     { id: 'storage', label: 'Almacenamiento', icon: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
@@ -21,7 +23,10 @@
     { id: 'users', label: 'Usuarios', icon: 'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M17 8l2 2 3-3' },
   ]
 
-  async function loadHealth() { health = await getHealth() }
+  async function loadHealth() {
+    health = await getHealth()
+    if (health.shim === 'up') service = await getServiceStatus()
+  }
 
   async function refreshAuth() {
     me = await authMe()
@@ -29,7 +34,27 @@
   }
   async function logout() { await authLogout(); await refreshAuth() }
 
-  onMount(async () => { await refreshAuth(); loading = false })
+  async function restartServer() {
+    if (restarting || !confirm('¿Reiniciar Library Server ahora? Las conexiones se recuperarán automáticamente.')) return
+    restarting = true
+    try {
+      await restartLibraryServer()
+      health = { shim: 'restarting', engine: 'restarting' }
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const next = await getHealth()
+        if (next.shim === 'up') { location.reload(); return }
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    } catch (e) {}
+    restarting = false
+  }
+
+  onMount(() => {
+    refreshAuth().finally(() => (loading = false))
+    const timer = setInterval(() => { if (me?.user?.isAdmin && !restarting) loadHealth() }, 5000)
+    return () => clearInterval(timer)
+  })
 
   const isAdmin = $derived(me?.user?.isAdmin)
 </script>
@@ -53,6 +78,9 @@
         </button>
       {/each}
       <span class="grow"></span>
+      {#if service.supervised}
+        <button class="btn restart" disabled={restarting} onclick={restartServer}>{restarting ? 'Reiniciando…' : 'Reiniciar servidor'}</button>
+      {/if}
       <button class="btn logout" onclick={logout}>Cerrar sesión</button>
     </nav>
   {/if}
@@ -100,6 +128,7 @@
   .topnav .tab.on { background: var(--signal-dim); color: var(--signal); border: 1px solid var(--signal-border); }
   .topnav .tab .ic { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   .topnav .logout { padding: 6px 12px; font-size: 12px; }
+  .topnav .restart { padding: 6px 12px; font-size: 12px; color: var(--warn); border-color: var(--warn-border); }
 
   .content { padding-top: 18px; }
 </style>

@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='20' font-size='20'>📚</text></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#141018" />
+    <meta name="application-name" content="Nimos Library" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Nimos Library</title>
     <script>
       // Anti-parpadeo: fija el tema (data-theme) antes de cargar el bundle.
@@ -21,5 +26,12 @@
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
+    <script type="module">
+      if (import.meta.env.PROD && 'serviceWorker' in navigator && !window.__NIMOS_LIBRARY_SHELL__) {
+        addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+        });
+      }
+    </script>
   </body>
 </html>

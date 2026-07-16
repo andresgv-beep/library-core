@@ -7,8 +7,13 @@ function normalizeBase(value) {
 
 function initialBase() {
   if (typeof window !== 'undefined') {
-    const injected = window.__NIMOS_LIBRARY_SERVER__;
-    if (injected) return normalizeBase(injected);
+    // El gateway inyecta expresamente una base vacia: todas las peticiones deben
+    // permanecer relativas para atravesar su reverse proxy. Comprobar la
+    // propiedad (y no su truthiness) evita que un servidor guardado previamente
+    // en localStorage rompa el mismo origen dentro de la app de escritorio.
+    if (Object.prototype.hasOwnProperty.call(window, '__NIMOS_LIBRARY_SERVER__')) {
+      return normalizeBase(window.__NIMOS_LIBRARY_SERVER__);
+    }
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) return normalizeBase(saved);
@@ -24,6 +29,9 @@ export function getServerBase() {
 }
 
 export function setServerBase(value) {
+  // En el gateway la direccion real pertenece al shell, no a la SPA. Un valor
+  // distinto de vacio haria que /content saliese del origen interno de Wails.
+  if (typeof window !== 'undefined' && window.__NIMOS_LIBRARY_SHELL__) return serverBase;
   const next = normalizeBase(value);
   if (next !== serverBase) setSessionToken('');
   serverBase = next;
@@ -32,6 +40,34 @@ export function setServerBase(value) {
     else localStorage.removeItem(STORAGE_KEY);
   } catch (e) {}
   return serverBase;
+}
+
+export function isGateway() {
+  return typeof window !== 'undefined' && window.__NIMOS_LIBRARY_GATEWAY__ === true;
+}
+
+export function isShell() {
+  return typeof window !== 'undefined' && window.__NIMOS_LIBRARY_SHELL__ === true;
+}
+
+export async function getGatewayTarget() {
+  if (!isGateway()) return getServerBase();
+  const response = await fetch('/__nimos/gateway', { cache: 'no-store' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return normalizeBase((await response.json()).target);
+}
+
+export async function setGatewayTarget(value) {
+  const response = await fetch('/__nimos/gateway', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target: normalizeBase(value) }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${response.status}`);
+  }
+  return normalizeBase((await response.json()).target);
 }
 
 export function serverUrl(path) {

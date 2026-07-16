@@ -1,0 +1,15 @@
+{
+  "name": "Nimos Library",
+  "short_name": "Library",
+  "description": "Tu biblioteca personal, servida por Library Server.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#141018",
+  "theme_color": "#141018",
+  "icons": [
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/logo-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

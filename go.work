@@ -4,5 +4,6 @@ use (
 	./engines/zim-engine
 	./library-server/core
 	./library-server/translate-wrap
+	./library-server/supervisor
 	./library-desktop
 )

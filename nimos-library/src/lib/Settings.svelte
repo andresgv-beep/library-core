@@ -1,19 +1,30 @@
 <script>
+  import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { t, i18n, setLocale, LANGS } from './i18n.svelte.js';
   import { theme, setTheme, THEMES } from './theme.svelte.js';
   import { profile, PROFILE_COLORS, setProfileName, setProfileColor, profileInitials, profileGradient } from './profile.svelte.js';
-  import { getServerBase, setServerBase, serverFetch } from './connection.js';
+  import { getServerBase, setServerBase, serverFetch, isGateway, isShell, getGatewayTarget, setGatewayTarget } from './connection.js';
 
   let serverAddress = $state(getServerBase());
   let serverStatus = $state('');
   let checkingServer = $state(false);
 
+  onMount(async () => {
+    if (!isGateway()) return;
+    try { serverAddress = await getGatewayTarget(); } catch (e) {}
+  });
+
   async function saveServer() {
-    setServerBase(serverAddress);
     checkingServer = true;
     serverStatus = 'Comprobando Library Server…';
     try {
+      if (isGateway()) {
+        await setGatewayTarget(serverAddress);
+        location.reload();
+        return;
+      }
+      setServerBase(serverAddress);
       const response = await serverFetch('/api/health');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       serverStatus = 'Conexión correcta. Recargando…';
@@ -42,15 +53,19 @@
           <small>Dirección del servidor que posee y sirve las colecciones, ZIM, vídeos y archivos.</small>
         </div>
       </div>
-      <label class="field">
-        <span>Dirección del servidor</span>
-        <input bind:value={serverAddress} placeholder="http://192.168.1.50:8090"
-          onkeydown={(e) => e.key === 'Enter' && saveServer()} />
-      </label>
-      <div class="server-actions">
-        <button class="save" disabled={checkingServer} onclick={saveServer}>Guardar y conectar</button>
-        {#if serverStatus}<small class="server-status">{serverStatus}</small>{/if}
-      </div>
+      {#if isShell() && !isGateway()}
+        <div class="local-server"><span class="status-dot"></span><span>Servidor local integrado</span></div>
+      {:else}
+        <label class="field">
+          <span>Dirección del servidor</span>
+          <input bind:value={serverAddress} placeholder="http://192.168.1.50:8090"
+            onkeydown={(e) => e.key === 'Enter' && saveServer()} />
+        </label>
+        <div class="server-actions">
+          <button class="save" disabled={checkingServer} onclick={saveServer}>Guardar y conectar</button>
+          {#if serverStatus}<small class="server-status">{serverStatus}</small>{/if}
+        </div>
+      {/if}
     </section>
 
     <section class="card">
@@ -151,6 +166,8 @@
   .save:hover:not(:disabled){background:color-mix(in srgb,var(--accent) 24%,transparent)}
   .save:disabled{opacity:.55;cursor:wait}
   .server-status{color:var(--muted);font-size:12.5px}
+  .local-server{display:flex;align-items:center;gap:9px;margin-top:16px;padding:12px 14px;border-radius:10px;background:var(--ground);border:1px solid var(--border);color:var(--ink-dim);font-size:13px}
+  .status-dot{width:8px;height:8px;border-radius:50%;background:#43b581;box-shadow:0 0 0 3px color-mix(in srgb,#43b581 18%,transparent)}
   .swatches{display:flex;gap:8px;margin-top:12px}
   .swatch{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;border:2px solid transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);transition:transform .12s,border-color .12s}
   .swatch:hover{transform:translateY(-1px)}

@@ -214,6 +214,7 @@ func main() {
 	// cerradura. Ruta admin nueva → se registra en `adminMux`, y ya está
 	// protegida sin tener que acordarse de nada.
 	adminMux := http.NewServeMux()
+	adminMux.HandleFunc("/api/admin/service", s.handleServiceControl)
 
 	// Motor de descargas (catálogo ZIM y descargas manuales del admin). DB propia
 	// para no estrangular library.db con SetMaxOpenConns(1). DOWNLOAD_ROOT es la
@@ -291,10 +292,10 @@ func main() {
 	// Mitad lectora: escanea las fichas del pool y sirve los ficheros locales
 	// (ver media.go). Comparte la raíz con las descargas.
 	md := &mediaDeps{root: downloadRoot}
-	s.registerMediaRoutes(mux, md)                                          // /api/media + /media/* — detrás del gate de acceso
-	mux.HandleFunc("/api/images", s.handleImageSearch(md))                  // imágenes: ZIM + portadas/logos de vídeos
-	adminMux.HandleFunc("/api/admin/media/delete", s.handleMediaDelete(md)) // borrar item del pool (admin)
-	adminMux.HandleFunc("/api/admin/upload", s.handleUpload(&uploadDeps{root: downloadRoot})) // carga manual (Moments/Cabinet)
+	s.registerMediaRoutes(mux, md)                                                                       // /api/media + /media/* — detrás del gate de acceso
+	mux.HandleFunc("/api/images", s.handleImageSearch(md))                                               // imágenes: ZIM + portadas/logos de vídeos
+	adminMux.HandleFunc("/api/admin/media/delete", s.handleMediaDelete(md))                              // borrar item del pool (admin)
+	adminMux.HandleFunc("/api/admin/upload", s.handleUpload(&uploadDeps{root: downloadRoot}))            // carga manual (Moments/Cabinet)
 	adminMux.HandleFunc("/api/admin/media/update", s.handleMediaUpdate(&uploadDeps{root: downloadRoot})) // editar ficha
 	s.registerItemRoutes(mux, md)
 

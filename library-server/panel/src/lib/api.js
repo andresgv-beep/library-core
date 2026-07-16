@@ -24,6 +24,10 @@ export const getLanguages = () =>
 
 // Salud del Core + motor
 export const getHealth = () => getJSON('/api/health').catch(() => ({ shim: 'down', engine: 'down' }))
+export const getServiceStatus = () =>
+  getJSON('/api/admin/service').catch(() => ({ supervised: false }))
+export const restartLibraryServer = () =>
+  postJSON('/api/admin/service', {})
 
 // ── Auth / usuarios ──
 export const authMe = () => getJSON('/api/auth/me').catch(() => ({ setupNeeded: false, user: null }))

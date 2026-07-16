@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#141018"/>
+  <g transform="translate(77 77) scale(.7)">
+    <defs>
+      <linearGradient id="cloud" x1="0.05" y1="0.15" x2="0.95" y2="0.85">
+        <stop offset="0" stop-color="#4a7df0"/><stop offset=".5" stop-color="#8b5cf6"/><stop offset="1" stop-color="#f0468a"/>
+      </linearGradient>
+      <linearGradient id="bolt" x1="0.2" y1="0" x2="0.8" y2="1">
+        <stop offset="0" stop-color="#c026d3"/><stop offset="1" stop-color="#db2777"/>
+      </linearGradient>
+    </defs>
+    <g fill="url(#cloud)">
+      <circle cx="184" cy="232" r="64"/><circle cx="256" cy="188" r="86"/><circle cx="332" cy="220" r="76"/><circle cx="300" cy="266" r="64"/><rect x="128" y="230" width="256" height="112" rx="56"/>
+    </g>
+    <path fill="#141018" d="M300 250q14 0 8 14l-20 48h44q16 0 6 15l-92 143q-10 12-6-6l22-70h-44q-16 0-8-15l46-112q4-10 12-14Z"/>
+    <path fill="url(#bolt)" d="M306 262q10 0 6 11l-22 52h42q13 0 5 13l-87 114q-8 10-5-5l22-66h-42q-13 0-7-12l44-104q4-8 11-11Z"/>
+  </g>
+</svg>
