@@ -97,10 +97,24 @@
   // Al cambiar de vídeo (p. ej. clic en Relacionados) el <source src> cambia pero
   // el <video> NO recarga solo → hay que llamar a load(). Sin esto seguía el vídeo
   // anterior aunque el título/descripción sí cambiaban.
+  // Además hay que RESETEAR el estado del reproductor a mano: load() aborta la
+  // reproducción y deja paused=true pero NO emite el evento `pause`, así que sin
+  // esto `playing` se quedaba en true del vídeo anterior y el botón mostraba
+  // "pausa" con el vídeo parado (se re-sincronizaba solo al pinchar). curTime/dur
+  // los repone onMeta al cargar los metadatos del nuevo vídeo.
   let lastURL = '';
   $effect(() => {
     const u = url;
-    if (videoEl && u && u !== lastURL) { lastURL = u; videoEl.load(); }
+    if (videoEl && u && u !== lastURL) {
+      lastURL = u;
+      playing = false; buffering = false; seeking = false;
+      curTime = 0; dur = 0; hoverPct = null; lastSave = 0;
+      videoEl.load();
+      // Autoarranque: al abrir un vídeo (rejilla o "Relacionados") se reproduce
+      // solo. Es un clic del usuario → la política de autoplay lo permite. Si el
+      // WebView lo bloqueara, el catch lo deja pausado (botón play correcto).
+      videoEl.play?.().catch(() => {});
+    }
   });
   const title = $derived(item?.title || open.title || tab.title || '');
   const author = $derived((item?.authors || []).join(', '));
