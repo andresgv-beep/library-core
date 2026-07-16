@@ -115,8 +115,10 @@ func handleServiceCommand(command string) error {
 		if status, queryErr := service.Query(); queryErr == nil && status.State == svc.Stopped {
 			return nil
 		}
-		_, err = service.Control(svc.Stop)
-		return err
+		if _, err = service.Control(svc.Stop); err != nil {
+			return err
+		}
+		return waitService(service, svc.Stopped, 30*time.Second)
 	case "restart":
 		service, err := manager.OpenService(serviceName)
 		if err != nil {

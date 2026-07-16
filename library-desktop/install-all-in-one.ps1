@@ -36,8 +36,20 @@ foreach ($required in @($SourceSupervisor, $SourceClient, $SourcePanel)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Falta $required. Ejecuta build.ps1 -Mode all-in-one." }
 }
 
-# Actualizacion segura: detener el servicio instalado antes de sustituir binarios.
-if (Test-Path -LiteralPath $Supervisor) { & $Supervisor stop }
+# Actualizacion segura: detener el servicio instalado y esperar a que Windows
+# libere el ejecutable antes de sustituir binarios.
+if (Test-Path -LiteralPath $Supervisor) {
+  & $Supervisor stop
+  if ($LASTEXITCODE -ne 0) { throw 'No se pudo detener Library Server para actualizarlo.' }
+  $deadline = (Get-Date).AddSeconds(30)
+  do {
+    $service = Get-Service -Name 'NimosLibraryServer' -ErrorAction SilentlyContinue
+    if (-not $service -or $service.Status -eq 'Stopped') { break }
+    Start-Sleep -Milliseconds 300
+    $service.Refresh()
+  } while ((Get-Date) -lt $deadline)
+  if ($service -and $service.Status -ne 'Stopped') { throw 'Library Server no termino de detenerse a tiempo.' }
+}
 New-Item -ItemType Directory -Force -Path $InstallBin | Out-Null
 Copy-Item -Path (Join-Path $SourceBin '*') -Destination $InstallBin -Recurse -Force
 Copy-Item -LiteralPath $SourceClient -Destination $Client -Force

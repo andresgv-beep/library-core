@@ -125,6 +125,7 @@ func main() {
 	// Índice de geocoding del plugin Maps (opcional: solo si existe geo.db).
 	var geo *sql.DB
 	geoPath := resolvePoolPath("GEO_DB", poolRoot, "maps/geo.db", filepath.Join(siblingDir("mapdata"), "geo.db"))
+	mapsDir := filepath.Dir(geoPath)
 	if _, statErr := os.Stat(geoPath); statErr == nil {
 		if g, gerr := sql.Open("sqlite", geoPath); gerr == nil {
 			geo = g
@@ -215,6 +216,13 @@ func main() {
 	// protegida sin tener que acordarse de nada.
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("/api/admin/service", s.handleServiceControl)
+	mapAdmin := newMapManager(mapsDir)
+	adminMux.HandleFunc("/api/admin/maps", mapAdmin.handleList)
+	adminMux.HandleFunc("/api/admin/maps/download", mapAdmin.handleDownload)
+	adminMux.HandleFunc("/api/admin/maps/cancel", mapAdmin.handleCancel)
+	adminMux.HandleFunc("/api/admin/maps/activate", mapAdmin.handleActivate)
+	adminMux.HandleFunc("/api/admin/maps/delete", mapAdmin.handleDelete)
+	mux.HandleFunc("/api/maps/config", mapAdmin.handlePublicConfig)
 
 	// Motor de descargas (catálogo ZIM y descargas manuales del admin). DB propia
 	// para no estrangular library.db con SetMaxOpenConns(1). DOWNLOAD_ROOT es la
@@ -303,13 +311,15 @@ func main() {
 	// zim/models viven detrás de kiwix/translate; el shim solo los reporta para el
 	// Panel (con POOL_ROOT o con ZIM_DIR/MODELS_DIR sueltos en dev).
 	pool := &poolInfo{
-		root:     poolRoot,
-		provider: env("POOL_PROVIDER", ""),
+		root:              poolRoot,
+		provider:          env("POOL_PROVIDER", ""),
+		configPath:        os.Getenv("NIMOS_LIBRARY_CONFIG"),
+		externallyManaged: os.Getenv("NIMOS_LIBRARY_STORAGE_MANAGED") == "environment",
 		sections: []sectionSpec{
 			{key: "zim", engine: "kiwix", path: zimDir},
 			{key: "models", engine: "translate", path: resolvePoolPath("MODELS_DIR", poolRoot, "models", "")},
 			{key: "downloads", engine: "media", path: downloadRoot},
-			{key: "maps", engine: "maps", path: filepath.Dir(geoPath)},
+			{key: "maps", engine: "maps", path: mapsDir},
 			{key: "db", engine: "shim", path: filepath.Dir(dbPath)},
 		},
 	}
@@ -344,7 +354,7 @@ func main() {
 	mux.HandleFunc("/catalog/v2/illustration/", s.handleContent) // logo/ilustración de cada ZIM (icono real)
 	// Plugin Maps (offline): página + assets estáticos y los tiles PMTiles (con range).
 	mux.Handle("/maps/", http.StripPrefix("/maps/", http.FileServer(http.Dir(siblingDir("maps-www")))))
-	mux.Handle("/mapdata/", http.StripPrefix("/mapdata/", http.FileServer(http.Dir(siblingDir("mapdata")))))
+	mux.Handle("/mapdata/", http.StripPrefix("/mapdata/", http.FileServer(http.Dir(mapsDir))))
 	// Panel de Control: segunda superficie (app aparte), servida como estáticos.
 	// no-cache en el HTML para que los rebuilds se reflejen sin hard-refresh; los
 	// assets van con hash en el nombre, así que su caché sí es segura.

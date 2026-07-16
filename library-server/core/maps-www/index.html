@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nimos Maps — Catalunya</title>
+<title>Nimos Maps</title>
 <link rel="stylesheet" href="/maps/vendor/maplibre-gl.css">
 <style>
   :root{ --accent:#7c6cf0; --accent-2:#9a8cff; --panel:#111117; --border:#23232e; --ink:#e9e9f0; --muted:#83838f; }
@@ -35,7 +35,7 @@
 <div class="search">
   <div class="box">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-    <input id="q" placeholder="Busca una calle o lugar de Catalunya…" autocomplete="off" spellcheck="false">
+    <input id="q" placeholder="Busca una calle o lugar…" autocomplete="off" spellcheck="false">
     <span class="brand">Nimos Maps</span>
   </div>
   <div id="results"></div>
@@ -49,6 +49,13 @@
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol('pmtiles', protocol.tile);
 
+  let active;
+  try { active = await (await fetch('/api/maps/config')).json(); } catch (e) {}
+  if (!active || !active.url) {
+    document.getElementById('hint').textContent = 'No hay ningún mapa instalado. Descárgalo desde el Panel de Control.';
+    return;
+  }
+
   // El mapa va SIEMPRE en claro (decisión de Andrés): resalta más dentro del shell
   // oscuro de Nimos (mapa luminoso flotando) y en tema claro queda cohesionado,
   // como un mapa normal. Se descartó el estilo oscuro del mapa.
@@ -60,17 +67,17 @@
     glyphs: '/maps/fonts/{fontstack}/{range}.pbf',   // vendorizado (offline)
     sprite: '/maps/sprites/' + flavor,                // vendorizado (offline)
     sources: {
-      protomaps: { type: 'vector', url: 'pmtiles://' + location.origin + '/mapdata/catalunya.pmtiles', attribution: '© OpenStreetMap' }
+      protomaps: { type: 'vector', url: 'pmtiles://' + location.origin + active.url, attribution: '© OpenStreetMap · Protomaps' }
     },
     layers
   };
-  const map = new maplibregl.Map({ container: 'map', style, center: [2.1734, 41.3851], zoom: 12, hash: true, attributionControl: false });
+  const map = new maplibregl.Map({ container: 'map', style, center: active.center || [0, 20], zoom: Math.min(7, active.maxZoom || 7), hash: true, attributionControl: false });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
   window._map = map;
 
   const hint = document.getElementById('hint');
-  map.on('load', () => { hint.textContent = 'Catalunya · Protomaps + MapLibre (offline)'; });
+  map.on('load', () => { hint.textContent = active.name + ' · Protomaps + MapLibre (offline)'; });
   map.on('error', (e) => { hint.textContent = 'Error: ' + (e.error && e.error.message || 'mapa'); });
 
   // ── Buscador → /api/maps/geocode (se conecta cuando el backend esté listo) ──

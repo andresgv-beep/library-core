@@ -9,9 +9,12 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // resolvePoolPath resuelve la ruta de un componente del pool con la precedencia
@@ -35,9 +38,19 @@ type sectionSpec struct {
 
 // poolInfo describe el pool para el inventario del Panel.
 type poolInfo struct {
-	root     string
-	provider string
-	sections []sectionSpec
+	root              string
+	provider          string
+	configPath        string
+	externallyManaged bool
+	sections          []sectionSpec
+}
+
+type storageConfig struct {
+	ContentRoot string `json:"contentRoot"`
+}
+
+type storageVolume struct {
+	Path string `json:"path"`
 }
 
 // storageSection es la forma JSON de una sección (POOL-CONTRACT.md §6).
@@ -52,8 +65,13 @@ type storageSection struct {
 
 // handleStorage: GET /api/storage — inventario read-only del pool.
 func (p *poolInfo) handleStorage(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPut {
+		p.handleStorageRootUpdate(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "solo GET"})
+		w.Header().Set("Allow", "GET, PUT")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "metodo no permitido"})
 		return
 	}
 	sections := make([]storageSection, 0, len(p.sections))
@@ -67,11 +85,102 @@ func (p *poolInfo) handleStorage(w http.ResponseWriter, r *http.Request) {
 		sections = append(sections, sec)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"root":      p.root,
-		"provider":  p.provider,
-		"usedBytes": used,
-		"sections":  sections,
+		"root":         p.root,
+		"provider":     p.provider,
+		"configurable": p.configPath != "" && !p.externallyManaged,
+		"volumes":      listStorageVolumes(),
+		"usedBytes":    used,
+		"sections":     sections,
 	})
+}
+
+func (p *poolInfo) handleStorageRootUpdate(w http.ResponseWriter, r *http.Request) {
+	if p.externallyManaged {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "la ubicacion esta gestionada por el entorno del servidor"})
+		return
+	}
+	if p.configPath == "" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "este servidor no dispone de configuracion persistente"})
+		return
+	}
+	var input storageConfig
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "JSON invalido"})
+		return
+	}
+	root, err := prepareStorageRoot(input.ContentRoot)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := writeStorageConfig(p.configPath, storageConfig{ContentRoot: root}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo guardar la ubicacion: " + err.Error()})
+		return
+	}
+	status := http.StatusOK
+	restarting := false
+	if os.Getenv("LIBRARY_SUPERVISED") == "1" {
+		status = http.StatusAccepted
+		restarting = scheduleSupervisedRestart()
+	}
+	writeJSON(w, status, map[string]any{"root": root, "restartRequired": true, "restarting": restarting})
+}
+
+func prepareStorageRoot(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("indica una carpeta")
+	}
+	root, err := filepath.Abs(raw)
+	if err != nil || !filepath.IsAbs(raw) {
+		return "", fmt.Errorf("la ruta debe ser absoluta")
+	}
+	root = filepath.Clean(root)
+	volume := filepath.VolumeName(root)
+	if root == string(filepath.Separator) || (volume != "" && strings.EqualFold(root, volume+string(filepath.Separator))) {
+		return "", fmt.Errorf("elige una carpeta dentro del disco, no la raiz del disco")
+	}
+	for _, protected := range []string{os.Getenv("WINDIR"), os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
+		if protected != "" && pathInside(root, protected) {
+			return "", fmt.Errorf("esa ubicacion pertenece al sistema; elige una carpeta de datos")
+		}
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", fmt.Errorf("no se pudo crear la carpeta: %w", err)
+	}
+	probe, err := os.CreateTemp(root, ".nimos-write-test-*")
+	if err != nil {
+		return "", fmt.Errorf("el servicio no puede escribir en esa carpeta: %w", err)
+	}
+	probePath := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(probePath)
+		return "", fmt.Errorf("no se pudo comprobar la carpeta: %w", err)
+	}
+	_ = os.Remove(probePath)
+	for _, child := range []string{"zim", "downloads", "models", "maps"} {
+		if err := os.MkdirAll(filepath.Join(root, child), 0o755); err != nil {
+			return "", fmt.Errorf("no se pudo preparar %s: %w", child, err)
+		}
+	}
+	return root, nil
+}
+
+func pathInside(path, parent string) bool {
+	path = strings.TrimRight(filepath.Clean(path), string(filepath.Separator))
+	parent = strings.TrimRight(filepath.Clean(parent), string(filepath.Separator))
+	return strings.EqualFold(path, parent) || strings.HasPrefix(strings.ToLower(path), strings.ToLower(parent+string(filepath.Separator)))
+}
+
+func writeStorageConfig(path string, cfg storageConfig) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(raw, '\n'), 0o600)
 }
 
 // dirUsage suma recursivamente el tamaño de un directorio y cuenta sus entradas

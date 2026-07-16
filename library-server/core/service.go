@@ -35,13 +35,20 @@ func (s *Server) handleServiceControl(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Library Server no esta bajo supervision"})
 		return
 	}
-	if !restartRequested.CompareAndSwap(false, true) {
+	if !scheduleSupervisedRestart() {
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "reinicio ya solicitado"})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "reiniciando"})
+}
+
+func scheduleSupervisedRestart() bool {
+	if !restartRequested.CompareAndSwap(false, true) {
+		return false
+	}
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		exitProcess(supervisedRestartExitCode)
 	}()
+	return true
 }

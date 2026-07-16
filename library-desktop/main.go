@@ -26,9 +26,9 @@ func main() {
 		log.Fatalf("newShell: %v", err)
 	}
 
-	title, width, height, minWidth, minHeight, frameless := "Nimos Library", 1200, 800, 900, 600, true
+	title, width, height, minWidth, minHeight := "Nimos Library", 1200, 800, 900, 600
 	if interfaceMode == "panel" {
-		title, width, height, minWidth, minHeight, frameless = "Library Control Panel", 1040, 760, 760, 520, false
+		title, width, height, minWidth, minHeight = "Library Control Panel", 1040, 760, 760, 520
 	}
 
 	err = wails.Run(&options.App{
@@ -39,7 +39,7 @@ func main() {
 		MinHeight: minHeight,
 		// Sin marco del SO: la SPA dibuja su propia barra (arrastre vía
 		// --wails-draggable) y sus controles min/max/cerrar (window.runtime).
-		Frameless:  frameless,
+		Frameless:  true,
 		OnStartup:  sh.onStartup,
 		OnShutdown: sh.onShutdown,
 		// AssetServer.Handler recibe TODAS las peticiones de la webview: splash

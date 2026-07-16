@@ -23,11 +23,11 @@ body {
     radial-gradient(ellipse at top, rgba(0,255,159,.04) 0%, transparent 50%),
     #0a0a0c;
   -webkit-font-smoothing: antialiased;
-  display: flex; justify-content: center; padding: 26px 20px;
+  display: flex; padding: 0;
 }
 /* El div de montura de Svelte (#app) es el flex-item real de body: si no ocupa
    todo el ancho, encoge al contenido y arrastra la ventana. Que llene y centre. */
-#app { flex: 1; min-width: 0; display: flex; justify-content: center; }
+#app { flex: 1; min-width: 0; display: flex; }
 button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
 input { font-family: inherit; color: inherit; background: none; border: none; outline: none; }
 code { font-family: var(--font-mono); }
@@ -39,10 +39,8 @@ a { color: var(--signal); text-decoration: none; }
 
 /* Ventana */
 .win {
-  width: min(940px, 100%); flex: none; background: var(--window-bg);
-  border: 1px solid var(--line-bright); border-radius: 12px; overflow: hidden;
-  box-shadow: 5px 5px 0 rgba(0,0,0,.6), 0 0 70px rgba(255,250,240,.04);
-  display: flex; flex-direction: column; height: calc(100vh - 52px);
+  width: 100%; min-width: 0; background: var(--window-bg); overflow: hidden;
+  display: flex; flex-direction: column; height: 100vh;
 }
 .tbar {
   height: 38px; flex: none; display: flex; align-items: center; padding: 0 14px;
@@ -50,9 +48,6 @@ a { color: var(--signal); text-decoration: none; }
 }
 .tbar b { color: var(--ink-dim); font-weight: 600; }
 .tbar .sep { color: var(--ink-trace); margin: 0 8px; }
-.dots { margin-left: auto; display: flex; gap: 8px; }
-.dots i { width: 11px; height: 11px; border-radius: 50%; display: block; }
-.dots .y { background: #fbbf24; } .dots .g { background: #00ff9f; } .dots .r { background: #f87171; }
 
 .content { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 18px 22px 0; }
 /* Solo el cuerpo de la sección scrollea; cabecera + KPIs + tabs quedan fijos. */

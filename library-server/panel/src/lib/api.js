@@ -6,13 +6,22 @@ async function getJSON(url, opts) {
   const r = await fetch(url, opts)
   if (!r.ok) {
     const msg = await r.text().catch(() => r.statusText)
-    throw new Error(msg || `HTTP ${r.status}`)
+    try { throw new Error(JSON.parse(msg).error || msg) } catch (e) {
+      if (e instanceof SyntaxError) throw new Error(msg || `HTTP ${r.status}`)
+      throw e
+    }
   }
   return r.json()
 }
 
 // Almacenamiento (pool) — POOL-CONTRACT.md §6
 export const getStorage = () => getJSON('/api/storage')
+export const setStorageRoot = (root) =>
+  getJSON('/api/storage', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentRoot: root }),
+  })
 
 // Colecciones normalizadas (ZIM + contenido publicado)
 export const getCollections = () =>
@@ -28,6 +37,17 @@ export const getServiceStatus = () =>
   getJSON('/api/admin/service').catch(() => ({ supervised: false }))
 export const restartLibraryServer = () =>
   postJSON('/api/admin/service', {})
+
+// Mapas offline: catalogo regional, extraccion PMTiles y mapa activo.
+export const getMaps = () => getJSON('/api/admin/maps')
+export const downloadMap = (regionId, maxZoom) =>
+  getJSON('/api/admin/maps/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ regionId, maxZoom }) })
+export const cancelMapDownload = () =>
+  getJSON('/api/admin/maps/cancel', { method: 'POST' })
+export const activateMap = (file) =>
+  getJSON('/api/admin/maps/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }) })
+export const deleteMap = (file) =>
+  getJSON('/api/admin/maps/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }) })
 
 // ── Auth / usuarios ──
 export const authMe = () => getJSON('/api/auth/me').catch(() => ({ setupNeeded: false, user: null }))

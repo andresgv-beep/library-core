@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -76,7 +77,7 @@ func (s *supervisor) run(ctx context.Context) error {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			s.runLoop(ctx, "translate", translate, s.translateEnv(), false)
+			s.runLoop(ctx, "translate", translate, s.translateEnv, false)
 		}()
 	}
 
@@ -84,13 +85,13 @@ func (s *supervisor) run(ctx context.Context) error {
 	if core == "" {
 		return fmt.Errorf("no se encontro library-server junto a %s", s.binDir)
 	}
-	s.runLoop(ctx, "core", core, s.coreEnv(), true)
+	s.runLoop(ctx, "core", core, s.coreEnv, true)
 	cancel()
 	workers.Wait()
 	return nil
 }
 
-func (s *supervisor) runLoop(ctx context.Context, name, executable string, env []string, core bool) {
+func (s *supervisor) runLoop(ctx context.Context, name, executable string, processEnv func() []string, core bool) {
 	delay := time.Second
 	for {
 		if ctx.Err() != nil {
@@ -99,7 +100,9 @@ func (s *supervisor) runLoop(ctx context.Context, name, executable string, env [
 		started := time.Now()
 		cmd := exec.Command(executable)
 		cmd.Dir = s.binDir
-		cmd.Env = env
+		// Se recalcula en cada arranque: los cambios guardados por el Panel se
+		// aplican al reiniciar Core sin que la interfaz tenga que tocar el servicio.
+		cmd.Env = processEnv()
 		setChildAttributes(cmd)
 		var output *os.File
 		if file, err := s.processLog(name); err == nil {
@@ -179,15 +182,63 @@ func (s *supervisor) processLog(name string) (*os.File, error) {
 
 func (s *supervisor) coreEnv() []string {
 	extra := map[string]string{"LIBRARY_SUPERVISED": "1"}
-	if os.Getenv("POOL_ROOT") == "" {
-		if root, err := supervisorDataDir("data"); err == nil {
+	stateRoot, stateErr := supervisorDataDir("data")
+	configPath, configErr := supervisorConfigPath()
+	if configErr == nil {
+		extra["NIMOS_LIBRARY_CONFIG"] = configPath
+	}
+
+	// POOL_ROOT solo contiene biblioteca pesada. Las bases administrativas se
+	// quedan en ProgramData para que desconectar el disco no borre usuarios ni
+	// impida entrar al Panel.
+	if stateErr == nil {
+		extra["DB_PATH"] = filepath.Join(stateRoot, "db", "library.db")
+		extra["DOWNLOADS_DB"] = filepath.Join(stateRoot, "db", "downloads.db")
+	}
+	if root := os.Getenv("POOL_ROOT"); root != "" {
+		extra["POOL_ROOT"] = root
+		extra["POOL_PROVIDER"] = env("POOL_PROVIDER", "environment")
+		extra["NIMOS_LIBRARY_STORAGE_MANAGED"] = "environment"
+	} else {
+		root := stateRoot
+		provider := "host"
+		if configErr == nil {
+			if cfg, err := readSupervisorConfig(configPath); err == nil && cfg.ContentRoot != "" {
+				root = cfg.ContentRoot
+				provider = "configured"
+			}
+		}
+		if root != "" {
 			extra["POOL_ROOT"] = root
 		}
+		extra["POOL_PROVIDER"] = provider
 	}
 	if os.Getenv("TRANSLATE_URL") == "" && findExecutable(s.binDir, "translate-wrap") != "" {
 		extra["TRANSLATE_URL"] = "http://127.0.0.1:" + env("TRANSLATE_PORT", "8091")
 	}
 	return mergeEnv(os.Environ(), extra)
+}
+
+type supervisorConfig struct {
+	ContentRoot string `json:"contentRoot"`
+}
+
+func supervisorConfigPath() (string, error) {
+	root, err := supervisorDataDir("")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "config.json"), nil
+}
+
+func readSupervisorConfig(path string) (supervisorConfig, error) {
+	var cfg supervisorConfig
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return cfg, err
+	}
+	err = json.Unmarshal(raw, &cfg)
+	return cfg, err
 }
 
 func (s *supervisor) translateEnv() []string {
