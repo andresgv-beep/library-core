@@ -36,7 +36,7 @@ func TestBuildGeoNamesCitiesIndexSearchesOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	hits := geoSearch(db, matchExpr(geoTokens("barcelona")), "barcelona")
+	hits := geoSearch(db, matchExpr(geoTokens("barcelona")), "barcelona", nil)
 	if len(hits) != 1 || hits[0].Name != "Barcelona" || hits[0].Lat == 0 || hits[0].Lon == 0 {
 		t.Fatalf("hits inesperados: %+v", hits)
 	}

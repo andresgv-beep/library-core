@@ -89,7 +89,8 @@
     const term = q.value.trim();
     if (!term) { results.innerHTML = ''; return; }
     let list = [];
-    try { list = await (await fetch('/api/maps/geocode?q=' + encodeURIComponent(term))).json(); } catch (e) {}
+    const bbox = Array.isArray(active.bbox) ? '&bbox=' + encodeURIComponent(active.bbox.join(',')) : '';
+    try { list = await (await fetch('/api/maps/geocode?q=' + encodeURIComponent(term) + bbox)).json(); } catch (e) {}
     results.innerHTML = '';
     if (!Array.isArray(list) || list.length === 0) {
       const empty = document.createElement('div');

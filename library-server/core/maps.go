@@ -53,7 +53,7 @@ func buildGeoNamesCitiesIndex(zipPath, dbPath string) (int, error) {
 	cleanup := func() { _ = db.Close(); _ = os.Remove(tmp) }
 	if _, err = db.Exec(`PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY;
 		CREATE VIRTUAL TABLE geo USING fts5(
-		name, kind UNINDEXED, lat UNINDEXED, lon UNINDEXED, context, display UNINDEXED,
+		name, kind UNINDEXED, lat UNINDEXED, lon UNINDEXED, context, display UNINDEXED, popularity UNINDEXED,
 		tokenize='unicode61 remove_diacritics 2');`); err != nil {
 		cleanup()
 		return 0, err
@@ -63,7 +63,7 @@ func buildGeoNamesCitiesIndex(zipPath, dbPath string) (int, error) {
 		cleanup()
 		return 0, err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO geo(name, kind, lat, lon, context, display) VALUES(?,?,?,?,?,?)`)
+	stmt, err := tx.Prepare(`INSERT INTO geo(name, kind, lat, lon, context, display, popularity) VALUES(?,?,?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		cleanup()
@@ -86,7 +86,8 @@ func buildGeoNamesCitiesIndex(zipPath, dbPath string) (int, error) {
 		// visual con la enorme columna de nombres alternativos.
 		context := strings.TrimSpace(c[2] + " " + c[8])
 		display := c[8]
-		if _, err = stmt.Exec(c[1], "place:"+strings.ToLower(c[7]), lat, lon, context, display); err != nil {
+		population, _ := strconv.ParseInt(c[14], 10, 64)
+		if _, err = stmt.Exec(c[1], "place:"+strings.ToLower(c[7]), lat, lon, context, display, population); err != nil {
 			_ = stmt.Close()
 			_ = tx.Rollback()
 			cleanup()
@@ -167,7 +168,7 @@ func buildGeoIndex(jsonPath, dbPath, geonamesPath, cpPrefixes string) error {
 	defer db.Close()
 	// remove_diacritics 2 → escribir "passeig" encuentra "Passeig" (sin acentos).
 	if _, err := db.Exec(`CREATE VIRTUAL TABLE geo USING fts5(
-		name, kind UNINDEXED, lat UNINDEXED, lon UNINDEXED, context, display UNINDEXED,
+		name, kind UNINDEXED, lat UNINDEXED, lon UNINDEXED, context, display UNINDEXED, popularity UNINDEXED,
 		tokenize='unicode61 remove_diacritics 2');`); err != nil {
 		return err
 	}
@@ -372,11 +373,12 @@ func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []GeoHit{})
 		return
 	}
+	bbox := parseGeoBBox(r.URL.Query().Get("bbox"))
 	// Intento estricto (todos los tokens). Si no hay nada, reintento soltando el
 	// primer token (suele ser el genérico "carrer/calle/avinguda…" que puede no
 	// casar el idioma). Los números de portal ya se quitaron en geoTokens.
 	for start := 0; start < len(toks) && start < 2; start++ {
-		if hits := geoSearch(geo, matchExpr(toks[start:]), q); len(hits) > 0 {
+		if hits := geoSearch(geo, matchExpr(toks[start:]), q, bbox); len(hits) > 0 {
 			writeJSON(w, http.StatusOK, hits)
 			return
 		}
@@ -414,18 +416,53 @@ func (s *Server) geocoder() *sql.DB {
 	return db
 }
 
-func geoSearch(db *sql.DB, match, raw string) []GeoHit {
+func parseGeoBBox(raw string) *[4]float64 {
+	parts := strings.Split(raw, ",")
+	if len(parts) != 4 {
+		return nil
+	}
+	var bbox [4]float64
+	for i, part := range parts {
+		v, err := strconv.ParseFloat(strings.TrimSpace(part), 64)
+		if err != nil {
+			return nil
+		}
+		bbox[i] = v
+	}
+	if bbox[0] >= bbox[2] || bbox[1] >= bbox[3] {
+		return nil
+	}
+	return &bbox
+}
+
+func geoSearch(db *sql.DB, match, raw string, bbox *[4]float64) []GeoHit {
+	where := "geo MATCH ?"
+	args := []any{match}
+	if bbox != nil {
+		where += " AND CAST(lon AS REAL) BETWEEN ? AND ? AND CAST(lat AS REAL) BETWEEN ? AND ?"
+		args = append(args, bbox[0], bbox[2], bbox[1], bbox[3])
+	}
+	args = append(args, raw, raw)
 	rows, err := db.Query(`
 		SELECT name, kind, lat, lon, context, display
-		FROM geo WHERE geo MATCH ?
+		FROM geo WHERE `+where+`
 		ORDER BY
 		  CASE WHEN lower(name)=lower(?) THEN 0
 		       WHEN lower(name) LIKE lower(?)||'%' THEN 1 ELSE 2 END,
 		  CASE WHEN kind LIKE 'place%' THEN 0 ELSE 1 END,
+		  COALESCE(CAST(popularity AS INTEGER), 0) DESC,
 		  bm25(geo)
-		LIMIT 12`, match, raw, raw)
+		LIMIT 12`, args...)
 	if err != nil {
-		return nil
+		// Compatibilidad con índices geo.db anteriores, sin columna popularity.
+		rows, err = db.Query(`
+			SELECT name, kind, lat, lon, context, display FROM geo WHERE `+where+`
+			ORDER BY CASE WHEN lower(name)=lower(?) THEN 0
+			WHEN lower(name) LIKE lower(?)||'%' THEN 1 ELSE 2 END,
+			CASE WHEN kind LIKE 'place%' THEN 0 ELSE 1 END, bm25(geo) LIMIT 12`, args...)
+		if err != nil {
+			return nil
+		}
 	}
 	defer rows.Close()
 	out := []GeoHit{}
