@@ -2,6 +2,7 @@
   import Home from './Home.svelte';
   import LibraryView from './LibraryView.svelte';
   import Settings from './Settings.svelte';
+  import ThirdParty from './ThirdParty.svelte';
   import TagsView from './TagsView.svelte';
   import Cabinet from './Cabinet.svelte';
   import Moments from './Moments.svelte';
@@ -202,6 +203,8 @@
     <div class="reader scroll"><Home {tab} {libraries} {favorites} {onNavigate} {onOpenItem} {onOpenView} {onToggleHome} /></div>
   {:else if tab.kind === 'view' && tab.view === 'settings'}
     <div class="reader"><Settings /></div>
+  {:else if tab.kind === 'view' && tab.view === 'information'}
+    <div class="reader"><ThirdParty /></div>
   {:else if tab.kind === 'view' && tab.view === 'tags'}
     <div class="reader"><TagsView {libraries} {tagsVersion} {onNavigate} {onOpenItem} /></div>
   {:else if tab.kind === 'view' && tab.view === 'maps'}

@@ -77,6 +77,7 @@
 
   <div class="foot">
     <button class="footbtn" class:active={activeView === 'settings'} title={t('side.settings')} onclick={() => onOpenView?.('settings')}><Icon name="settings" size={17} /> {t('side.settings')}</button>
+    <button class="footbtn" class:active={activeView === 'information'} title={t('side.information')} onclick={() => onOpenView?.('information')}><Icon name="info" size={17} /> {t('side.information')}</button>
     <button class="user" title={t('side.account')} onclick={() => onAccount?.()}>
       <span class="avatar" style:background={profileGradient(profile.color)}>{user ? user.username.slice(0, 2).toUpperCase() : profileInitials(profile.name)}</span>
       <span class="uinfo">

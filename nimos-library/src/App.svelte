@@ -225,7 +225,11 @@
     if (!tab.search) tab.search = emptySearch();
   }
   // titleKey → la pestaña se re-traduce sola al cambiar de idioma (Tabs resuelve con t()).
-  const viewTitleKey = (view) => (view === 'settings' ? 'settings.title' : 'menu.' + view);
+  const viewTitleKey = (view) => {
+    if (view === 'settings') return 'settings.title';
+    if (view === 'information') return 'thirdParty.title';
+    return 'menu.' + view;
+  };
   function setView(tab, view) {
     tab.kind = 'view'; tab.view = view; tab.titleKey = viewTitleKey(view); tab.title = view; tab.error = null;
   }
