@@ -97,6 +97,38 @@ func TestMapSearchThematicQueryDoesNotCreateLocation(t *testing.T) {
 	}
 }
 
+func TestMapSearchRequiresStreetIntentForPersonName(t *testing.T) {
+	s, m, db := makeMapSearchFixture(t, true)
+	defer db.Close()
+	streets := makeGeoTestDB(t, streetIndexPath(m.root, "iberia-z14.pmtiles"), [][]any{
+		{"Carrer Michael Jackson", "street:minor_road", 41.2205, 1.5348, "El Vendrell", "", 0},
+	})
+	if err := streets.Close(); err != nil {
+		t.Fatal(err)
+	}
+	status, response := requestMapSearch(t, s, m, "/api/maps/search?q=Michael%20Jackson&radius=0")
+	if status != http.StatusOK || response.Available || response.Reason != "no_match" {
+		t.Fatalf("un nombre de persona no debe activar una calle: status=%d response=%+v", status, response)
+	}
+	status, response = requestMapSearch(t, s, m, "/api/maps/search?q=Carrer%20Michael%20Jackson&radius=0")
+	if status != http.StatusOK || !response.Available || response.Location == nil || response.Location.Name != "Carrer Michael Jackson" {
+		t.Fatalf("la intencion explicita de calle debe funcionar: status=%d response=%+v", status, response)
+	}
+}
+
+func TestStreetIntentDesignators(t *testing.T) {
+	for _, query := range []string{"calle Alcala", "Avenida Diagonal", "Carrer Mallorca", "passeig de Gracia", "Rua do Sol", "c/ Mayor", "Av. America", "Baker Street"} {
+		if !hasStreetIntent(query) {
+			t.Errorf("deberia detectar intencion de calle en %q", query)
+		}
+	}
+	for _, query := range []string{"Michael Jackson", "historia de Madrid", "Barcelona", "Via Lactea documental"} {
+		if hasStreetIntent(query) {
+			t.Errorf("no deberia detectar intencion de calle en %q", query)
+		}
+	}
+}
+
 func TestGeocodeContractDoesNotExposeMapSearchMetadata(t *testing.T) {
 	s, _, db := makeMapSearchFixture(t, true)
 	defer db.Close()

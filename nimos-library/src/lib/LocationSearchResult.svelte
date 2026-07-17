@@ -95,7 +95,7 @@
 {/if}
 
 <style>
-  .geo{position:relative;width:calc(100% - 80px);max-width:1300px;min-height:310px;margin:0 auto;display:grid;grid-template-columns:minmax(260px,38%) 1fr;overflow:hidden;isolation:isolate}
+  .geo{position:relative;width:calc(100% - 80px);max-width:1300px;min-height:310px;margin:14px auto 0;display:grid;grid-template-columns:minmax(260px,38%) 1fr;overflow:hidden;isolation:isolate}
   .geo-copy{position:relative;z-index:3;align-self:center;padding:28px 10px 28px 54px}
   .geo-kind{display:flex;align-items:center;gap:7px;color:var(--accent-2);font-size:11px;font-weight:650;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px}
   h2{font-size:26px;line-height:1.2;font-weight:650;color:var(--ink);letter-spacing:-.3px}
@@ -106,7 +106,7 @@
   .radius-label output{color:var(--ink);font-weight:600}
   .radius-label input{width:100%;accent-color:var(--accent);cursor:pointer;margin-top:9px}
   .range-ends{display:flex;justify-content:space-between;color:var(--faint);font-size:10.5px;margin-top:1px}
-  .map-wrap{position:absolute;inset:0 0 0 36%;overflow:hidden;
+  .map-wrap{position:absolute;inset:0 0 0 36%;overflow:hidden;border-radius:16px;
     -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 10px,#000 calc(100% - 10px),transparent 100%),linear-gradient(180deg,transparent 0,#000 10px,#000 calc(100% - 10px),transparent 100%);
     -webkit-mask-composite:source-in;
     mask-image:linear-gradient(90deg,transparent 0,#000 10px,#000 calc(100% - 10px),transparent 100%),linear-gradient(180deg,transparent 0,#000 10px,#000 calc(100% - 10px),transparent 100%);

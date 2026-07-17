@@ -85,7 +85,11 @@ func (s *Server) handleMapSearch(m *mapManager) http.HandlerFunc {
 
 		hits := s.searchGeo(query, active.File, &active.BBox)
 		locations := make([]mapSearchLocation, 0, len(hits))
+		streetIntent := hasStreetIntent(query)
 		for _, hit := range hits {
+			if strings.HasPrefix(hit.Kind, "street") && !streetIntent {
+				continue
+			}
 			quality := geoMatchQuality(query, hit)
 			if quality == "exact" || quality == "strong" {
 				locations = append(locations, mapSearchLocation{GeoHit: hit, MatchQuality: quality})
@@ -128,6 +132,39 @@ func (s *Server) handleMapSearch(m *mapManager) http.HandlerFunc {
 			},
 		})
 	}
+}
+
+func hasStreetIntent(query string) bool {
+	raw := strings.ToLower(strings.TrimSpace(query))
+	for _, prefix := range []string{"c/", "c.", "cl/", "cl.", "av/", "av.", "avda/", "avda.", "ctra/", "ctra.", "crta/", "crta."} {
+		if strings.HasPrefix(raw, prefix) {
+			return true
+		}
+	}
+	fields := strings.Fields(normalizeText(query))
+	if len(fields) == 0 {
+		return false
+	}
+	prefixDesignators := map[string]bool{
+		"calle": true, "calles": true, "callejon": true,
+		"carrer": true, "carrers": true, "carrero": true,
+		"avenida": true, "avenidas": true, "avinguda": true, "avingudes": true,
+		"paseo": true, "passeig": true, "passejos": true,
+		"plaza": true, "placa": true, "plazoleta": true,
+		"camino": true, "cami": true, "carretera": true, "estrada": true,
+		"travesia": true, "travessera": true, "ronda": true, "rambla": true,
+		"rua": true, "vial": true, "bulevar": true, "boulevard": true,
+		"autovia": true, "autopista": true,
+	}
+	if prefixDesignators[fields[0]] {
+		return true
+	}
+	// En ingles el tipo de via suele ir al final: "Baker Street".
+	suffixDesignators := map[string]bool{
+		"street": true, "road": true, "avenue": true,
+		"lane": true, "drive": true, "highway": true,
+	}
+	return suffixDesignators[fields[len(fields)-1]]
 }
 
 // En Library una consulta desnuda como "Madrid" expresa normalmente una

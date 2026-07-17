@@ -33,7 +33,7 @@ func (m *mapManager) handleNearby(w http.ResponseWriter, r *http.Request) {
 	lat, errLat := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
 	lon, errLon := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
 	mapFile := filepath.Base(strings.TrimSpace(r.URL.Query().Get("map")))
-	radius := 2200 // compatibilidad con la vista Maps existente
+	radius := 2500 // valor por defecto de Maps; valido en la escala 0-5 km
 	if rawRadius := strings.TrimSpace(r.URL.Query().Get("radius")); rawRadius != "" {
 		parsed, parseErr := strconv.Atoi(rawRadius)
 		if parseErr != nil || parsed < 0 || parsed > 5000 || parsed%500 != 0 {

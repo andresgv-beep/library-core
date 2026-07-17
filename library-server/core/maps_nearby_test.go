@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -27,6 +29,16 @@ func TestNearbyRadiusZeroDoesNotOpenMap(t *testing.T) {
 	hits, err := m.nearby(context.Background(), 40.4168, -3.7038, "missing.pmtiles", 0)
 	if err != nil || len(hits) != 0 {
 		t.Fatalf("radius=0 debe ser vacio sin abrir mapa: hits=%+v err=%v", hits, err)
+	}
+}
+
+func TestHandleNearbyAcceptsDefaultRadius(t *testing.T) {
+	m := &mapManager{root: t.TempDir()}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/maps/nearby?lat=41.38879&lon=2.15899&map=missing.pmtiles", nil)
+	m.handleNearby(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("el radio por defecto debe pasar la validacion: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

@@ -205,7 +205,7 @@
   {:else if tab.kind === 'view' && tab.view === 'tags'}
     <div class="reader"><TagsView {libraries} {tagsVersion} {onNavigate} {onOpenItem} /></div>
   {:else if tab.kind === 'view' && tab.view === 'maps'}
-    <iframe class="pluginframe" title={t('menu.maps')} src={serverUrl('/maps/')}></iframe>
+    <iframe class="pluginframe" title={t('menu.maps')} src={serverUrl('/maps/?v=compact-panel-2')}></iframe>
   {:else if tab.kind === 'view' && tab.view === 'cabinet'}
     <Cabinet {onOpenItem} />
   {:else if tab.kind === 'view' && tab.view === 'moments'}

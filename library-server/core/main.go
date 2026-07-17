@@ -392,7 +392,15 @@ func main() {
 	mux.HandleFunc("/content/", s.handleContent)                 // passthrough directo (streaming, §7)
 	mux.HandleFunc("/catalog/v2/illustration/", s.handleContent) // logo/ilustración de cada ZIM (icono real)
 	// Plugin Maps (offline): página + assets estáticos y los tiles PMTiles (con range).
-	mux.Handle("/maps/", http.StripPrefix("/maps/", http.FileServer(http.Dir(siblingDir("maps-www")))))
+	mapsFS := http.StripPrefix("/maps/", http.FileServer(http.Dir(siblingDir("maps-www"))))
+	mux.HandleFunc("/maps/", func(w http.ResponseWriter, r *http.Request) {
+		// El HTML no lleva nombre versionado: WebView2 debe revalidarlo tras cada
+		// instalacion. Fuentes, sprites y vendor siguen aprovechando su cache.
+		if r.URL.Path == "/maps/" || strings.HasSuffix(r.URL.Path, "/index.html") {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		}
+		mapsFS.ServeHTTP(w, r)
+	})
 	mux.Handle("/mapdata/", http.StripPrefix("/mapdata/", http.FileServer(http.Dir(mapsDir))))
 	// Panel de Control: segunda superficie (app aparte), servida como estáticos.
 	// no-cache en el HTML para que los rebuilds se reflejen sin hard-refresh; los
