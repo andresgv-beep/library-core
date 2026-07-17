@@ -10,7 +10,7 @@
   import Icon from './Icon.svelte';
   import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { t } from './i18n.svelte.js';
+  import { t, i18n } from './i18n.svelte.js';
   import { translateSegments } from './libraryApi.js';
   import { tstate, targetLang, nativeLang, norm2 } from './translate.svelte.js';
   import { serverUrl } from './connection.js';
@@ -205,7 +205,7 @@
   {:else if tab.kind === 'view' && tab.view === 'tags'}
     <div class="reader"><TagsView {libraries} {tagsVersion} {onNavigate} {onOpenItem} /></div>
   {:else if tab.kind === 'view' && tab.view === 'maps'}
-    <iframe class="pluginframe" title={t('menu.maps')} src={serverUrl('/maps/?v=compact-panel-2')}></iframe>
+    <iframe class="pluginframe" title={t('menu.maps')} src={serverUrl(`/maps/?v=compact-panel-3&lang=${encodeURIComponent(i18n.locale)}`)}></iframe>
   {:else if tab.kind === 'view' && tab.view === 'cabinet'}
     <Cabinet {onOpenItem} />
   {:else if tab.kind === 'view' && tab.view === 'moments'}

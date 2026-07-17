@@ -45,12 +45,12 @@
   </div>
 </div>
 <aside class="side-panel" id="sidePanel" hidden>
-  <section id="searchView"><div class="panel-label">Resultados</div><div id="results"></div></section>
+  <section id="searchView"><div class="panel-label" id="resultsLabel">Resultados</div><div id="results"></div></section>
   <section id="placeView" hidden>
     <button class="back" id="backResults">&#8592; Volver a resultados</button>
-    <div class="panel-label">Ubicación</div><h2 class="address" id="address"></h2><p class="address-context" id="addressContext"></p>
+    <div class="panel-label" id="locationLabel">Ubicación</div><h2 class="address" id="address"></h2><p class="address-context" id="addressContext"></p>
     <span class="approx" id="approx" hidden>Posición aproximada de la calle</span>
-    <div class="nearby-head"><h3>Cerca de aquí</h3><span>ordenado por distancia</span></div><div id="nearby"></div>
+    <div class="nearby-head"><h3 id="nearbyTitle">Cerca de aquí</h3><span id="nearbyOrder">ordenado por distancia</span></div><div id="nearby"></div>
   </section>
 </aside>
 <div class="hint" id="hint">Cargando mapa…</div>
@@ -59,13 +59,48 @@
 <script src="/maps/vendor/pmtiles.js"></script>
 <script>
 (async () => {
+  const requestedLang = new URLSearchParams(location.search).get('lang');
+  const lang = requestedLang === 'en' ? 'en' : 'es';
+  const messages = {
+    es: {
+      searchPlaceholder: 'Busca una calle o lugar…', results: 'Resultados', back: '← Volver a resultados',
+      location: 'Ubicación', approximate: 'Posición aproximada de la calle', nearby: 'Cerca de aquí',
+      distanceOrder: 'ordenado por distancia', loadingMap: 'Cargando mapa…',
+      noMap: 'No hay ningún mapa instalado. Descárgalo desde el Panel de Control.',
+      mapError: 'Error', noResults: 'Sin resultados. Comprueba que el buscador offline esté instalado.',
+      searchingNearby: 'Buscando lugares cercanos…', noNearby: 'No hay puntos de interés cercanos en este mapa.',
+      street: 'Calle', place: 'Localidad', postcode: 'Código postal', offline: 'offline',
+      categories: { restaurant:'Restaurante', cafe:'Cafetería', bar:'Bar', fuel:'Gasolinera', shop:'Comercio', health:'Salud', lodging:'Alojamiento', parking:'Aparcamiento', bank:'Banco', transport:'Transporte', culture:'Cultura y ocio', park:'Parque' }
+    },
+    en: {
+      searchPlaceholder: 'Search for a street or place…', results: 'Results', back: '← Back to results',
+      location: 'Location', approximate: 'Approximate street position', nearby: 'Nearby',
+      distanceOrder: 'sorted by distance', loadingMap: 'Loading map…',
+      noMap: 'No map is installed. Download one from Control Panel.',
+      mapError: 'Error', noResults: 'No results. Check that the offline search index is installed.',
+      searchingNearby: 'Searching for nearby places…', noNearby: 'No nearby points of interest on this map.',
+      street: 'Street', place: 'Place', postcode: 'Postcode', offline: 'offline',
+      categories: { restaurant:'Restaurant', cafe:'Café', bar:'Bar', fuel:'Fuel station', shop:'Shopping', health:'Health', lodging:'Lodging', parking:'Parking', bank:'Bank', transport:'Transport', culture:'Culture and leisure', park:'Park' }
+    }
+  };
+  const ui = messages[lang];
+  document.documentElement.lang = lang;
+  document.getElementById('q').placeholder = ui.searchPlaceholder;
+  document.getElementById('resultsLabel').textContent = ui.results;
+  document.getElementById('backResults').textContent = ui.back;
+  document.getElementById('locationLabel').textContent = ui.location;
+  document.getElementById('approx').textContent = ui.approximate;
+  document.getElementById('nearbyTitle').textContent = ui.nearby;
+  document.getElementById('nearbyOrder').textContent = ui.distanceOrder;
+  document.getElementById('hint').textContent = ui.loadingMap;
+
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol('pmtiles', protocol.tile);
 
   let active;
   try { active = await (await fetch('/api/maps/config')).json(); } catch (e) {}
   if (!active || !active.url) {
-    document.getElementById('hint').textContent = 'No hay ningún mapa instalado. Descárgalo desde el Panel de Control.';
+    document.getElementById('hint').textContent = ui.noMap;
     return;
   }
 
@@ -105,8 +140,8 @@
   window._map = map;
 
   const hint = document.getElementById('hint');
-  map.on('load', () => { hint.textContent = active.name + ' · Protomaps + MapLibre (offline)'; });
-  map.on('error', (e) => { hint.textContent = 'Error: ' + (e.error && e.error.message || 'mapa'); });
+  map.on('load', () => { hint.textContent = active.name + ' · Protomaps + MapLibre (' + ui.offline + ')'; });
+  map.on('error', (e) => { hint.textContent = ui.mapError + ': ' + (e.error && e.error.message || 'map'); });
 
   // ── Buscador → /api/maps/geocode (se conecta cuando el backend esté listo) ──
   const q = document.getElementById('q'), results = document.getElementById('results');
@@ -131,7 +166,7 @@
     if (lastResults.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'no-results';
-      empty.textContent = 'Sin resultados. Comprueba que el buscador offline esté instalado.';
+      empty.textContent = ui.noResults;
       results.appendChild(empty);
       return;
     }
@@ -169,33 +204,34 @@
     document.getElementById('address').textContent = displayAddress(r);
     document.getElementById('addressContext').textContent = [r.context, kindLabel(r.kind)].filter(Boolean).join(' · ');
     document.getElementById('approx').hidden = !r.approximate;
-    nearby.innerHTML = '<div class="nearby-empty">Buscando lugares cercanos…</div>';
+    nearby.innerHTML = '<div class="nearby-empty">' + ui.searchingNearby + '</div>';
     let list = [];
     try { list = await (await fetch('/api/maps/nearby?lat=' + r.lat + '&lon=' + r.lon + '&map=' + encodeURIComponent(active.file))).json(); } catch (e) {}
     renderNearby(Array.isArray(list) ? list : []);
   }
   function displayAddress(r) { return r.name + (r.houseNumber ? ' ' + r.houseNumber : ''); }
-  function kindLabel(kind) { return String(kind || '').startsWith('street') ? 'Calle' : String(kind || '').startsWith('place') ? 'Localidad' : kind === 'postcode' ? 'Código postal' : ''; }
+  function kindLabel(kind) { return String(kind || '').startsWith('street') ? ui.street : String(kind || '').startsWith('place') ? ui.place : kind === 'postcode' ? ui.postcode : ''; }
   function showResults() { searchView.hidden = false; placeView.hidden = true; sidePanel.hidden = !q.value.trim(); }
   function closePanel() { sidePanel.hidden = true; results.innerHTML = ''; lastResults = []; }
   function renderNearby(list) {
     nearby.innerHTML = '';
-    if (!list.length) { nearby.innerHTML = '<div class="nearby-empty">No hay puntos de interés cercanos en este mapa.</div>'; return; }
+    if (!list.length) { nearby.innerHTML = '<div class="nearby-empty">' + ui.noNearby + '</div>'; return; }
     for (const p of list) {
       const b = document.createElement('button'); b.className = 'nearby-item';
       b.innerHTML = '<span class="nearby-icon"></span><span class="nearby-copy"><b></b><small></small></span><span class="distance"></span>';
-      b.querySelector('.nearby-icon').textContent = categoryIcon(p.category); b.querySelector('b').textContent = p.name;
-      b.querySelector('small').textContent = p.category; b.querySelector('.distance').textContent = distanceLabel(p.distance);
+      b.querySelector('.nearby-icon').textContent = categoryIcon(p.categoryCode); b.querySelector('b').textContent = p.name;
+      b.querySelector('small').textContent = categoryLabel(p); b.querySelector('.distance').textContent = distanceLabel(p.distance);
       b.onclick = () => focusNearby(p); nearby.appendChild(b);
     }
   }
   function focusNearby(p) {
     map.flyTo({ center: [p.lon, p.lat], zoom: Math.min(18, viewerMaxZoom) });
     if (poiMarker) poiMarker.remove();
-    poiMarker = new maplibregl.Marker({ color: '#23b68c', scale: .85 }).setLngLat([p.lon, p.lat]).setPopup(new maplibregl.Popup({ offset: 18 }).setText(p.name + ' · ' + p.category)).addTo(map).togglePopup();
+    poiMarker = new maplibregl.Marker({ color: '#23b68c', scale: .85 }).setLngLat([p.lon, p.lat]).setPopup(new maplibregl.Popup({ offset: 18 }).setText(p.name + ' · ' + categoryLabel(p))).addTo(map).togglePopup();
   }
-  function distanceLabel(m) { return m < 1000 ? m + ' m' : (m / 1000).toFixed(1).replace('.', ',') + ' km'; }
-  function categoryIcon(category) { return ({'Restaurante':'🍴','Cafetería':'☕','Bar':'●','Gasolinera':'⛽','Comercio':'▣','Salud':'✚','Alojamiento':'⌂','Aparcamiento':'P','Banco':'€','Transporte':'↔','Cultura y ocio':'★','Parque':'♧'})[category] || '•'; }
+  function distanceLabel(m) { const value = (m / 1000).toFixed(1); return m < 1000 ? m + ' m' : (lang === 'es' ? value.replace('.', ',') : value) + ' km'; }
+  function categoryLabel(p) { return ui.categories[p.categoryCode] || p.category || ''; }
+  function categoryIcon(code) { return ({restaurant:'🍴',cafe:'☕',bar:'●',fuel:'⛽',shop:'▣',health:'✚',lodging:'⌂',parking:'P',bank:'€',transport:'↔',culture:'★',park:'♧'})[code] || '•'; }
 })();
 </script>
 </body>

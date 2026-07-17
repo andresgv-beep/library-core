@@ -18,10 +18,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -30,14 +32,15 @@ import (
 )
 
 var (
-	bin   string
-	sem   chan struct{}
-	mu    sync.RWMutex        // protege pairs/model (loadModels reescribe en caliente)
-	pairs []map[string]string // [{from,to}] instalados
-	model = map[string]string{} // "en-es" -> "en-es-tiny"
-	reMdl = regexp.MustCompile(`-m\s+([a-z]{2,3})-([a-z]{2,3})-(\w+)`)
-	reWS  = regexp.MustCompile(`\s+`)
-	reSeg = regexp.MustCompile(`(?s)<p data-tw="(\d+)">(.*?)</p>`)
+	bin       string
+	modelsDir string
+	sem       chan struct{}
+	mu        sync.RWMutex          // protege pairs/model (loadModels reescribe en caliente)
+	pairs     []map[string]string   // [{from,to}] instalados
+	model     = map[string]string{} // "en-es" -> "en-es-tiny"
+	reMdl     = regexp.MustCompile(`-m\s+([a-z]{2,3})-([a-z]{2,3})-(\w+)`)
+	reWS      = regexp.MustCompile(`\s+`)
+	reSeg     = regexp.MustCompile(`(?s)<p data-tw="(\d+)">(.*?)</p>`)
 	// Línea de modelo tanto en -l ("To invoke do -m id") como en -a ("To download do -d id").
 	reModelLine = regexp.MustCompile(`(?m)^(.+?) type: (\S+) version: \d+; To \w+ do -[dm] (\S+)\s*$`)
 	reModelID   = regexp.MustCompile(`^[a-z]{2,4}-[a-z]{2,4}-\w+$`)
@@ -50,11 +53,130 @@ func env(k, def string) string {
 	return def
 }
 
+func engineCommand(args ...string) *exec.Cmd {
+	cmd := exec.Command(bin, args...)
+	if modelsDir == "" {
+		return cmd
+	}
+	cmd.Dir = modelsDir
+	cmd.Env = append([]string(nil), os.Environ()...)
+	if runtime.GOOS == "windows" {
+		cmd.Env = replaceEnv(cmd.Env, "APPDATA", modelsDir)
+	} else {
+		cmd.Env = replaceEnv(cmd.Env, "XDG_DATA_HOME", modelsDir)
+	}
+	return cmd
+}
+
+func replaceEnv(base []string, key, value string) []string {
+	prefix := strings.ToUpper(key) + "="
+	result := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		if !strings.HasPrefix(strings.ToUpper(entry), prefix) {
+			result = append(result, entry)
+		}
+	}
+	return append(result, key+"="+value)
+}
+
+func legacyModelsDir() string {
+	if runtime.GOOS == "windows" {
+		if root := os.Getenv("APPDATA"); root != "" {
+			return filepath.Join(root, "translateLocally")
+		}
+		return ""
+	}
+	if root := os.Getenv("XDG_DATA_HOME"); root != "" {
+		return filepath.Join(root, "translateLocally")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "translateLocally")
+}
+
+// migrateLegacyModels copia solo ficheros ausentes. El origen se conserva para
+// que el cambio de ubicacion sea recuperable y nunca pise modelos ya presentes.
+func migrateLegacyModels(source, destination string) (int, error) {
+	if source == "" || samePath(source, destination) {
+		return 0, nil
+	}
+	if _, err := os.Stat(source); os.IsNotExist(err) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return 0, err
+	}
+	copied := 0
+	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		target := filepath.Join(destination, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return err
+		}
+		if _, err := os.Stat(target); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+		if err != nil {
+			in.Close()
+			return err
+		}
+		_, copyErr := io.Copy(out, in)
+		closeOutErr := out.Close()
+		closeInErr := in.Close()
+		if copyErr != nil || closeOutErr != nil || closeInErr != nil {
+			_ = os.Remove(target)
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeOutErr != nil {
+				return closeOutErr
+			}
+			return closeInErr
+		}
+		copied++
+		return nil
+	})
+	return copied, err
+}
+
+func samePath(a, b string) bool {
+	a, _ = filepath.Abs(filepath.Clean(a))
+	b, _ = filepath.Abs(filepath.Clean(b))
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
 // loadModels ejecuta `translateLocally -l` y arma pares + mapa (from-to)->modelId.
 // Construye copias locales y las intercambia bajo lock: seguro con traducciones
 // en curso y refleja bien los modelos añadidos/quitados en caliente.
 func loadModels() error {
-	out, err := exec.Command(bin, "-l").Output()
+	out, err := engineCommand("-l").Output()
 	if err != nil {
 		return err
 	}
@@ -119,7 +241,7 @@ func installedIDs() map[string]bool {
 // GET /models/available — modelos descargables (translateLocally -a), marcando
 // los ya instalados.
 func handleModelsAvailable(w http.ResponseWriter, r *http.Request) {
-	out, err := exec.Command(bin, "-a").CombinedOutput()
+	out, err := engineCommand("-a").CombinedOutput()
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "no se pudo listar disponibles", "detail": string(out)})
 		return
@@ -154,7 +276,7 @@ func handleModelOp(w http.ResponseWriter, r *http.Request, flag, verb string) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "id de modelo inválido"})
 		return
 	}
-	out, err := exec.Command(bin, flag, req.ID).CombinedOutput()
+	out, err := engineCommand(flag, req.ID).CombinedOutput()
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "no se pudo " + verb + " " + req.ID, "detail": strings.TrimSpace(string(out))})
 		return
@@ -239,7 +361,7 @@ func runEngine(modelID string, lines []string, html bool) ([]string, error) {
 	if html {
 		return runEngineHTML(modelID, lines)
 	}
-	cmd := exec.Command(bin, "-m", modelID)
+	cmd := engineCommand("-m", modelID)
 	cmd.Stdin = strings.NewReader(strings.Join(lines, "\n") + "\n")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -260,7 +382,7 @@ func runEngineHTML(modelID string, lines []string) ([]string, error) {
 	for i, l := range lines {
 		fmt.Fprintf(&sb, `<p data-tw="%d">%s</p>`, i, l)
 	}
-	cmd := exec.Command(bin, "-m", modelID, "--html")
+	cmd := engineCommand("-m", modelID, "--html")
 	cmd.Stdin = strings.NewReader(sb.String())
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -291,6 +413,23 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func main() {
 	bin = env("TRANSLATE_BIN", `C:\Users\asus\nimos-tools\translate\translateLocally.exe`)
+	modelsDir = strings.TrimSpace(os.Getenv("MODELS_DIR"))
+	if modelsDir != "" {
+		absolute, err := filepath.Abs(modelsDir)
+		if err != nil {
+			log.Fatalf("ruta de modelos invalida %q: %v", modelsDir, err)
+		}
+		modelsDir = absolute
+		if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+			log.Fatalf("no se pudo preparar la ruta de modelos %s: %v", modelsDir, err)
+		}
+		destination := filepath.Join(modelsDir, "translateLocally")
+		copied, err := migrateLegacyModels(legacyModelsDir(), destination)
+		if err != nil {
+			log.Fatalf("no se pudieron conservar los modelos existentes en %s: %v", destination, err)
+		}
+		log.Printf("modelos de traduccion: %s (migrados sin borrar el origen: %d ficheros)", destination, copied)
+	}
 	port := env("PORT", "8091")
 	bind := env("BIND", "127.0.0.1")
 

@@ -53,3 +53,30 @@ func TestCoreEnvLoadsConfiguredContentRootAndKeepsStateDB(t *testing.T) {
 		}
 	}
 }
+
+func TestTranslateEnvUsesConfiguredModelsDir(t *testing.T) {
+	base := t.TempDir()
+	content := filepath.Join(base, "large-library")
+	t.Setenv("NIMOS_LIBRARY_DATA", base)
+	t.Setenv("POOL_ROOT", "")
+	t.Setenv("MODELS_DIR", "")
+	configPath := filepath.Join(base, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"contentRoot":"`+strings.ReplaceAll(content, `\`, `\\`)+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	joined := strings.Join((&supervisor{}).translateEnv(), "\n")
+	want := "MODELS_DIR=" + filepath.Join(content, "models")
+	if !strings.Contains(joined, want) {
+		t.Fatalf("falta %q en entorno:\n%s", want, joined)
+	}
+}
+
+func TestTranslateEnvRespectsExplicitModelsDir(t *testing.T) {
+	explicit := filepath.Join(t.TempDir(), "custom-models")
+	t.Setenv("MODELS_DIR", explicit)
+	joined := strings.Join((&supervisor{}).translateEnv(), "\n")
+	if !strings.Contains(joined, "MODELS_DIR="+explicit) {
+		t.Fatalf("no se respeto MODELS_DIR explicito:\n%s", joined)
+	}
+}

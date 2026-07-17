@@ -242,10 +242,35 @@ func readSupervisorConfig(path string) (supervisorConfig, error) {
 }
 
 func (s *supervisor) translateEnv() []string {
-	return mergeEnv(os.Environ(), map[string]string{
+	extra := map[string]string{
 		"PORT": env("TRANSLATE_PORT", "8091"),
 		"BIND": "127.0.0.1",
-	})
+	}
+	if modelsDir := translateModelsDir(); modelsDir != "" {
+		extra["MODELS_DIR"] = modelsDir
+	}
+	return mergeEnv(os.Environ(), extra)
+}
+
+// translateModelsDir mantiene los modelos dentro de la misma biblioteca pesada
+// que muestra el Panel. MODELS_DIR permite una eleccion explicita para despliegues
+// especiales, y POOL_ROOT conserva el comportamiento esperado por entorno.
+func translateModelsDir() string {
+	if root := os.Getenv("MODELS_DIR"); root != "" {
+		return root
+	}
+	if root := os.Getenv("POOL_ROOT"); root != "" {
+		return filepath.Join(root, "models")
+	}
+	if configPath, err := supervisorConfigPath(); err == nil {
+		if cfg, err := readSupervisorConfig(configPath); err == nil && cfg.ContentRoot != "" {
+			return filepath.Join(cfg.ContentRoot, "models")
+		}
+	}
+	if stateRoot, err := supervisorDataDir("data"); err == nil {
+		return filepath.Join(stateRoot, "models")
+	}
+	return ""
 }
 
 func mergeEnv(base []string, extra map[string]string) []string {
