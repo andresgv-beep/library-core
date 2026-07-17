@@ -79,6 +79,8 @@ library-desktop\bin\maps-www\...
 
 `build.ps1` ensambla ocho piezas: cliente PWA, Panel de Control, servidor, traducción, supervisor, PMTiles, aplicación nativa y Panel de Control nativo. Algunos avisos de Svelte ya conocidos no significan que la compilación haya fallado; lo decisivo es el código de salida y el mensaje final `OK`.
 
+La compilación también regenera `nimos-library/public/THIRD-PARTY-NOTICES.txt` a partir de los ejecutables terminados y lo incluye en el cliente. Si aparece una cola `REVIEW REQUIRED`, la versión no debe publicarse hasta incorporar los textos de licencia que falten.
+
 No usar `-Mode remote` para actualizar el todo-en-uno. Ese modo genera únicamente el cliente remoto.
 
 ## 4. Instalar con elevación real de Windows
@@ -166,4 +168,3 @@ La tarea solo está terminada cuando:
 - **“Maps sigue mostrando el HTML antiguo”**: comparar `library-server/core/maps-www/index.html` con `Program Files/Nimos Library/bin/maps-www/index.html`.
 - **“El servicio funciona pero la ventana no cambió”**: cerrar y volver a abrir `nimos-library.exe`.
 - **“Solo generé nimos-library-client.exe”**: se usó el modo `remote`; para esta instalación se necesita `all-in-one`.
-
