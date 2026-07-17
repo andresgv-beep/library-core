@@ -365,25 +365,38 @@ func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []GeoHit{})
 		return
 	}
+	bbox := parseGeoBBox(r.URL.Query().Get("bbox"))
+	rawMapFile := strings.TrimSpace(r.URL.Query().Get("map"))
+	mapFile := filepath.Base(rawMapFile)
+	if mapFile != rawMapFile {
+		mapFile = ""
+	}
+	writeJSON(w, http.StatusOK, s.searchGeo(q, mapFile, bbox))
+}
+
+// searchGeo contiene la operación reutilizable del geocodificador. Los
+// handlers deciden cómo validar y presentar sus parámetros, pero Maps y
+// Library comparten exactamente el mismo ranking y los mismos índices.
+func (s *Server) searchGeo(q, mapFile string, bbox *[4]float64) []GeoHit {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return []GeoHit{}
+	}
 	geo := s.geocoder()
 	if geo == nil {
-		writeJSON(w, http.StatusOK, []GeoHit{})
-		return
+		return []GeoHit{}
 	}
 	toks := geoTokens(q)
 	if len(toks) == 0 {
-		writeJSON(w, http.StatusOK, []GeoHit{})
-		return
+		return []GeoHit{}
 	}
-	bbox := parseGeoBBox(r.URL.Query().Get("bbox"))
-	mapFile := filepath.Base(strings.TrimSpace(r.URL.Query().Get("map")))
 	// Intento estricto (todos los tokens). Si no hay nada, reintento soltando el
 	// primer token (suele ser el genérico "carrer/calle/avinguda…" que puede no
 	// casar el idioma). Los números de portal ya se quitaron en geoTokens.
 	for start := 0; start < len(toks) && start < 2; start++ {
 		match := matchExpr(toks[start:])
 		var hits []GeoHit
-		if mapFile != "" && mapFile == r.URL.Query().Get("map") {
+		if mapFile != "" {
 			streetPath := streetIndexPath(s.mapsDir, mapFile)
 			if st, statErr := os.Stat(streetPath); statErr == nil && st.Size() > 0 {
 				if streets, err := sql.Open("sqlite", streetPath); err == nil {
@@ -401,11 +414,10 @@ func (s *Server) handleGeocode(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			writeJSON(w, http.StatusOK, hits)
-			return
+			return hits
 		}
 	}
-	writeJSON(w, http.StatusOK, []GeoHit{})
+	return []GeoHit{}
 }
 
 func geoHouseNumber(q string) string {

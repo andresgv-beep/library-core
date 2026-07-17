@@ -79,6 +79,13 @@ export async function itemSearch(q, { signal } = {}) {
   return data.results || [];
 }
 
+export async function mapSearch(q, radius = 2500, { signal } = {}) {
+  if (!q || !q.trim()) return { available: false, reason: 'no_match', location: null, alternatives: [], pois: [], map: null, radius };
+  const params = new URLSearchParams({ q: q.trim(), radius: String(radius) });
+  const r = await serverFetch(`/api/maps/search?${params}`, { signal });
+  return jsonOrError(r);
+}
+
 export async function suggest(lib, q) {
   if (!q || !q.trim()) return [];
   const r = await serverFetch(`/api/libraries/${encodeURIComponent(lib)}/search?q=${encodeURIComponent(q)}`);

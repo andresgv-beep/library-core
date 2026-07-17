@@ -4,8 +4,9 @@
   import Wordmark from './Wordmark.svelte';
   import ZimIcon from './ZimIcon.svelte';
   import BrandIcon from './BrandIcon.svelte';
+  import LocationSearchResult from './LocationSearchResult.svelte';
   import { siteShown } from './sites.svelte.js';
-  import { itemSearch, globalImages } from './libraryApi.js';
+  import { itemSearch, globalImages, mapSearch } from './libraryApi.js';
   import { t, tn, i18n } from './i18n.svelte.js';
 
   let { tab, libraries = [], favorites = [], onNavigate, onOpenItem, onOpenView, onToggleHome } = $props();
@@ -21,7 +22,17 @@
   let timer;                   // debounce del full-text (caro)
   let settleTimer;             // registra la búsqueda "asentada" en recientes
   let ctrl;                    // AbortController de la búsqueda en curso
+  let mapCtrl;                 // Maps no bloquea ni comparte cancelación con ZIM
   let focused = $state(false); // input enfocado → mostrar el desplegable
+
+  function ensureLocation() {
+    if (!s.location) s.location = { status: 'idle', result: null, radius: 2500, selectedPoi: null };
+    return s.location;
+  }
+  function locationStatus(response) {
+    if (response?.available) return 'ready';
+    return response?.reason === 'no_match' ? 'empty' : 'unavailable';
+  }
 
   // Búsquedas recientes (historial en el navegador). Instantáneas; re-buscar una
   // tira del cache del shim → resultado inmediato. Estilo omnibox del navegador.
@@ -54,27 +65,45 @@
     const term = s.q;
     if (!term.trim()) {
       ctrl?.abort();
+      mapCtrl?.abort();
       s.results = []; s.groups = []; s.images = []; s.searched = false; s.loading = false;
+      s.location = { status: 'idle', result: null, radius: ensureLocation().radius, selectedPoi: null };
       return;
     }
     s.loading = true;
     timer = setTimeout(() => run(term), 320);
   }
   function submit(e) { e?.preventDefault(); clearTimeout(timer); focused = false; if (s.q.trim()) { recordRecent(s.q); run(s.q); } }
-  async function run(term) {
+  function run(term) {
     ctrl?.abort();
+    mapCtrl?.abort();
     ctrl = new AbortController();
     s.loading = true;
     const m = s.mode;
-    try {
-      if (m === 'images') {
+    if (m === 'images') {
+      s.location = { status: 'idle', result: null, radius: ensureLocation().radius, selectedPoi: null };
+      (async () => { try {
         const res = await globalImages(term, { signal: ctrl.signal });
         if (term === s.q && s.mode === 'images') { s.images = res; s.searched = true; s.loading = false; scheduleRecord(term); }
-      } else {
+      } catch (e) { if (e?.name !== 'AbortError' && term === s.q) { s.images = []; s.searched = true; s.loading = false; } } })();
+      return;
+    }
+
+    const radius = ensureLocation().radius;
+    s.location = { status: 'loading', result: null, radius, selectedPoi: null };
+    mapCtrl = new AbortController();
+    (async () => { try {
         const res = await itemSearch(term, { signal: ctrl.signal });
         if (term === s.q && s.mode === 'all') { s.results = res; s.groups = []; s.searched = true; s.loading = false; scheduleRecord(term); }
+      } catch (e) { if (e?.name !== 'AbortError' && term === s.q) { s.results = []; s.searched = true; s.loading = false; } } })();
+    (async () => { try {
+      const response = await mapSearch(term, radius, { signal: mapCtrl.signal });
+      if (term === s.q && s.mode === 'all') {
+        s.location = { status: locationStatus(response), result: response.available ? response : null, radius, selectedPoi: null };
       }
-    } catch (e) { /* abortada al seguir tecleando → la nueva ya está en marcha */ }
+    } catch (e) {
+      if (e?.name !== 'AbortError' && term === s.q && s.mode === 'all') s.location = { status: 'error', result: null, radius, selectedPoi: null };
+    } })();
   }
   // Registra el término solo si el usuario se "asienta" en él (no cada prefijo).
   function scheduleRecord(term) {
@@ -82,8 +111,22 @@
     settleTimer = setTimeout(() => { if (term === s.q) recordRecent(term); }, 1200);
   }
   function setMode(m) { if (m === s.mode) return; s.mode = m; if (s.q.trim()) { s.searched = false; run(s.q); } }
-  function clear() { ctrl?.abort(); clearTimeout(settleTimer); s.q = ''; s.results = []; s.groups = []; s.images = []; s.searched = false; s.loading = false; }
+  function clear() { ctrl?.abort(); mapCtrl?.abort(); clearTimeout(settleTimer); s.q = ''; s.results = []; s.groups = []; s.images = []; s.searched = false; s.loading = false; s.location = { status: 'idle', result: null, radius: ensureLocation().radius, selectedPoi: null }; }
   function pickRecent(term) { s.q = term; focused = false; recordRecent(term); run(term); }
+  async function changeRadius(radius) {
+    const term = s.q.trim();
+    if (!term || s.mode !== 'all') return;
+    mapCtrl?.abort();
+    mapCtrl = new AbortController();
+    const previous = ensureLocation().result;
+    s.location = { ...ensureLocation(), status: 'loading', radius, result: previous };
+    try {
+      const response = await mapSearch(term, radius, { signal: mapCtrl.signal });
+      if (term === s.q.trim() && s.mode === 'all') s.location = { status: locationStatus(response), result: response.available ? response : null, radius, selectedPoi: null };
+    } catch (e) {
+      if (e?.name !== 'AbortError' && term === s.q.trim()) s.location = { status: 'error', result: previous, radius, selectedPoi: null };
+    }
+  }
   function normalizeResults(results) {
     return (results || []).map((hit) => {
       const book = hit.subtitle || hit.collectionId || '';
@@ -185,9 +228,12 @@
       <div class="status">{t('home.searchingImages', { n: libraries.length })}</div>
     {/if}
   {:else}
+    {#if s.location?.result}
+      <LocationSearchResult locationState={s.location} onRadiusChange={changeRadius} />
+    {/if}
     {#if s.searched && pageResults.length}
       <div class="results">
-        <div class="resultcount">{tn('home.results', pageResults.length, { n: pageResults.length.toLocaleString(i18n.locale) })}</div>
+        <div class="resulthead"><b>{t('home.map.collectionResults')}</b><span>{tn('home.results', pageResults.length, { n: pageResults.length.toLocaleString(i18n.locale) })}</span></div>
         <div class="hits">
           {#each pageResults as hit}
             <button class="hit" class:hasthumb={hit.thumb} onclick={() => onOpenItem?.(hit.itemId)}>
@@ -205,9 +251,9 @@
           {/each}
         </div>
       </div>
-    {:else if s.searched}
+    {:else if s.searched && !s.location?.result}
       <div class="status">{t('home.noResults', { q: s.q })}</div>
-    {:else}
+    {:else if !s.searched}
       <div class="status">{t('home.searching', { n: libraries.length })}</div>
     {/if}
   {/if}
@@ -257,7 +303,8 @@
 
   .status{max-width:1560px;margin:30px auto;padding:0 40px;color:var(--muted);text-align:center}
   .results{max-width:1400px;margin:0 auto;padding:10px 40px 90px;display:flex;flex-direction:column;gap:14px}
-  .resultcount{font-size:13.5px;color:var(--faint);font-variant-numeric:tabular-nums;padding:0 14px}
+  .resulthead{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:0 14px;color:var(--faint);font-size:13px}
+  .resulthead b{color:var(--ink);font-size:14px;font-weight:650}
   .hits{display:flex;flex-direction:column;gap:8px}
   .hit{text-align:left;padding:14px;border-radius:11px;transition:background .12s;width:100%;display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
   .hit.hasthumb{grid-template-columns:minmax(0,1fr) 126px;column-gap:18px;align-items:start}

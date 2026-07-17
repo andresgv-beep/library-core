@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"math"
 	"testing"
 )
@@ -10,6 +11,33 @@ func TestNearbyCategory(t *testing.T) {
 	for kind, want := range cases {
 		if got := nearbyCategory(kind); got != want {
 			t.Fatalf("nearbyCategory(%q)=%q, want %q", kind, got, want)
+		}
+	}
+}
+
+func TestNearbyCategoryIncludesStableCode(t *testing.T) {
+	code, label := nearbyCategoryInfo("museum")
+	if code != "culture" || label != "Cultura y ocio" {
+		t.Fatalf("categoria inesperada: %q %q", code, label)
+	}
+}
+
+func TestNearbyRadiusZeroDoesNotOpenMap(t *testing.T) {
+	m := &mapManager{root: t.TempDir()}
+	hits, err := m.nearby(context.Background(), 40.4168, -3.7038, "missing.pmtiles", 0)
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("radius=0 debe ser vacio sin abrir mapa: hits=%+v err=%v", hits, err)
+	}
+}
+
+func TestNearbyTilePlanIsBounded(t *testing.T) {
+	for _, latitude := range []float64{0, 40.4168, 70, 84} {
+		for _, radius := range []int{500, 2500, 5000} {
+			zoom, tileRadius := nearbyTilePlan(latitude, radius, 15)
+			tiles := (2*tileRadius + 1) * (2*tileRadius + 1)
+			if zoom > 15 || tiles > 121 {
+				t.Fatalf("plan fuera de limites para lat=%.1f %dm: zoom=%d tiles=%d", latitude, radius, zoom, tiles)
+			}
 		}
 	}
 }

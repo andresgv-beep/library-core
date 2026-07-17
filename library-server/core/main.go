@@ -250,6 +250,7 @@ func main() {
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("/api/admin/service", s.handleServiceControl)
 	mapAdmin := newMapManager(mapsDir, geoPath)
+	mux.HandleFunc("/api/maps/search", s.handleMapSearch(mapAdmin))
 	adminMux.HandleFunc("/api/admin/maps", mapAdmin.handleList)
 	adminMux.HandleFunc("/api/admin/maps/download", mapAdmin.handleDownload)
 	adminMux.HandleFunc("/api/admin/maps/cancel", mapAdmin.handleCancel)

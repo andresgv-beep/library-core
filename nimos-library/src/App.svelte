@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { getLibraries, getItem, resolveProviderItem, itemSearch } from './lib/libraryApi.js';
+  import { getLibraries, getItem, resolveProviderItem, itemSearch, mapSearch } from './lib/libraryApi.js';
   import { parseLibraryAddress } from './lib/libraryAddress.js';
   import * as readerState from './lib/readerStateApi.js';
   import Tabs from './lib/Tabs.svelte';
@@ -182,7 +182,10 @@
   });
 
   function emptySearch() {
-    return { q: '', mode: 'all', results: [], groups: [], images: [], searched: false, loading: false };
+    return {
+      q: '', mode: 'all', results: [], groups: [], images: [], searched: false, loading: false,
+      location: { status: 'idle', result: null, radius: 2500, selectedPoi: null },
+    };
   }
   function makeHome() {
     return { id: uid++, kind: 'home', lib: null, path: null, titleKey: 'tab.home', title: 'Inicio', article: null, toc: [], loading: false, error: null, back: [], fwd: [], search: emptySearch() };
@@ -312,8 +315,15 @@
       if (active.kind !== 'home') { pushHistory(active); setHome(active); }
       const search = active.search || (active.search = emptySearch());
       search.q = addr.query; search.mode = 'all'; search.loading = true; search.searched = false;
-      try { search.results = await itemSearch(addr.query); search.searched = true; }
-      catch (e) { search.results = []; search.searched = true; }
+      search.location = { status: 'loading', result: null, radius: 2500, selectedPoi: null };
+      const [items, location] = await Promise.allSettled([itemSearch(addr.query), mapSearch(addr.query, 2500)]);
+      search.results = items.status === 'fulfilled' ? items.value : [];
+      search.searched = true;
+      if (location.status === 'fulfilled' && location.value?.available) {
+        search.location = { ...search.location, status: 'ready', result: location.value };
+      } else {
+        search.location = { ...search.location, status: location.status === 'rejected' ? 'error' : (location.value?.reason === 'no_match' ? 'empty' : 'unavailable'), result: null };
+      }
       search.loading = false;
     }
   }

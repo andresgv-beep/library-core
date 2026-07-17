@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/paulmach/orb/encoding/mvt"
 )
@@ -123,13 +124,15 @@ type mapManager struct {
 	streetJob          *streetIndexJob
 	streetCancel       context.CancelFunc
 	cancel             context.CancelFunc
+	nearbyCache        *lruCache
 }
 
 func newMapManager(root, geoPath string) *mapManager {
 	return &mapManager{
 		root: root, geoPath: geoPath, tool: findMapTool(),
-		source:    env("MAP_SOURCE_URL", defaultMapSource),
-		geoSource: env("MAP_GEONAMES_URL", defaultGeoNamesSource),
+		source:      env("MAP_SOURCE_URL", defaultMapSource),
+		geoSource:   env("MAP_GEONAMES_URL", defaultGeoNamesSource),
+		nearbyCache: newLRUCache(128, 10*time.Minute),
 	}
 }
 
