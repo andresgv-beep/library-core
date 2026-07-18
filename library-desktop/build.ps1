@@ -13,18 +13,34 @@ $Bin     = Join-Path $Desktop 'bin'
 $env:PATH = "$env:PATH;$env:USERPROFILE\go\bin"
 $env:GOCACHE = Join-Path $env:TEMP 'nimos-go-build-cache'
 $env:GOTELEMETRY = 'off'
+$ClientResource = Join-Path $Desktop 'nimos_library_icon.syso'
+$ClientIcon = Join-Path $Desktop 'assets\nimos-library.ico'
 
 function Assert-NativeSuccess([string]$Step) {
   if ($LASTEXITCODE -ne 0) { throw "$Step fallo con codigo $LASTEXITCODE" }
 }
 
+function New-ClientResource {
+  if (-not (Test-Path -LiteralPath $ClientIcon -PathType Leaf)) { throw "Falta el icono del cliente: $ClientIcon" }
+  if (Test-Path -LiteralPath $ClientResource) { Remove-Item -LiteralPath $ClientResource -Force }
+  Push-Location $Desktop
+  try {
+    go run ./cmd/iconresource -icon $ClientIcon -out $ClientResource
+    Assert-NativeSuccess 'Recurso de icono del cliente'
+  } finally { Pop-Location }
+}
+
 if ($Mode -eq 'remote') {
   Write-Host '[1/1] Cliente de escritorio remoto...' -ForegroundColor Cyan
+  New-ClientResource
   Push-Location $Desktop
   try {
     go build -tags 'desktop production' -ldflags '-H windowsgui -X main.distributionMode=remote' -o 'nimos-library-client.exe' .
     Assert-NativeSuccess 'Cliente remoto'
-  } finally { Pop-Location }
+  } finally {
+    Pop-Location
+    if (Test-Path -LiteralPath $ClientResource) { Remove-Item -LiteralPath $ClientResource -Force }
+  }
   Write-Host "OK -> $Desktop\nimos-library-client.exe" -ForegroundColor Green
   exit 0
 }
@@ -72,11 +88,15 @@ if (-not (Test-Path -LiteralPath $PMTiles)) {
 if (-not (Test-Path -LiteralPath $PMTiles)) { throw 'No se genero pmtiles.exe' }
 
 Write-Host '[7/10] Nimos Library...' -ForegroundColor Cyan
+New-ClientResource
 Push-Location $Desktop
 try {
   go build -tags 'desktop production' -ldflags '-H windowsgui' -o 'nimos-library-all-in-one.exe' .
   Assert-NativeSuccess 'Nimos Library'
-} finally { Pop-Location }
+} finally {
+  Pop-Location
+  if (Test-Path -LiteralPath $ClientResource) { Remove-Item -LiteralPath $ClientResource -Force }
+}
 
 Write-Host '[8/10] Library Control Panel nativo...' -ForegroundColor Cyan
 Push-Location $Desktop
