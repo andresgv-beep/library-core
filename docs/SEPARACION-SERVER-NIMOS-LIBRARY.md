@@ -293,14 +293,14 @@ La separación visual no basta. El servidor debe aplicar permisos en las rutas r
 
 Ocultar una colección en Nimos Library no es una medida de seguridad. La autorización debe ocurrir en Library Server.
 
-**Hallazgo (2026-07-14, probando los permisos en vivo):** la `searchCache` del
-servidor cachea por consulta normalizada SIN distinguir usuario. Efecto real
-observado: una búsqueda anónima (0 colecciones visibles) cachea el resultado
-vacío y se lo sirve luego al usuario autenticado; a la inversa, resultados de un
-usuario con acceso amplio podrían servirse a otro con menos permisos. Al
-endurecer los permisos, la clave de la caché debe incluir la identidad o el
-conjunto de colecciones visibles (p. ej. hash de la lista de libs), o saltarse
-la caché para anónimos.
+**Hallazgo (2026-07-14, probando los permisos en vivo) — ✅ RESUELTO (verificado
+2026-07-18):** la `searchCache` cacheaba por consulta normalizada SIN distinguir
+usuario, así que un resultado de un usuario con acceso amplio podía servirse a
+otro con menos permisos (y viceversa con el anónimo). **Arreglado:** en
+`library-server/core/search.go`, `handleGlobalSearch` calcula `visibleLibs`
+ANTES de tocar la caché y la clave es `searchVisibilityCacheKey(q, libs)`
+(`search.go:109`) = `normalizeText(q)` + NUL + lista ORDENADA de IDs de libs
+visibles. Distinta visibilidad → distinta entrada; queda como registro.
 
 ### 6.7 Información administrativa
 
