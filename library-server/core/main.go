@@ -676,7 +676,18 @@ func (s *Server) handleContent(w http.ResponseWriter, r *http.Request) {
 		}
 		interactive := false
 		dest := r.Header.Get("Sec-Fetch-Dest")
-		if zimID != "" && (dest == "document" || dest == "iframe" || r.Header.Get("Sec-Fetch-Mode") == "navigate") {
+		mode := r.Header.Get("Sec-Fetch-Mode")
+		// Un navegador marca la navegación de la página con Sec-Fetch-Dest
+		// document/iframe (o Sec-Fetch-Mode navigate) y así solo el documento —no
+		// sus sub-recursos— consulta la confianza. Pero el canal library:// de la
+		// app de escritorio (WebView2 sobre esquema propio) NO envía cabeceras
+		// Sec-Fetch: en ese caso (ambas vacías) no se puede distinguir documento de
+		// sub-recurso, así que se concede el modo interactivo. Es seguro: el gate
+		// real es interactiveAllowed (solo ZIM de confianza) y el CSP de un
+		// sub-recurso .js/.css no gobierna la ejecución. Sin esto, TED y demás ZIM
+		// con JS quedaban en blanco SOLO en la app de escritorio (en navegador no).
+		navLike := dest == "document" || dest == "iframe" || mode == "navigate" || (dest == "" && mode == "")
+		if zimID != "" && navLike {
 			interactive = s.zimAdmin != nil && s.zimAdmin.interactiveAllowed(zimID)
 		}
 		setContentIsolation(w, interactive)

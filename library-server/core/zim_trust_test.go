@@ -135,4 +135,14 @@ func TestTrustedZimGetsInteractivePolicyInsideReaderIframe(t *testing.T) {
 	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'none'") {
 		t.Fatalf("los recursos secundarios no deben consultar ni ampliar la confianza: %s", csp)
 	}
+
+	// La app de escritorio carga por el esquema library:// (WebView2), que NO
+	// envía cabeceras Sec-Fetch. Sin ellas hay que conceder el modo interactivo
+	// igual, o los ZIM de confianza con JS (TED) salen en blanco SOLO en la app.
+	req = httptest.NewRequest(http.MethodGet, "/content/manual/index", nil)
+	w = httptest.NewRecorder()
+	s.handleContent(w, req)
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("sin cabeceras Sec-Fetch (canal library://) debe darse la politica interactiva: %s", csp)
+	}
 }
