@@ -103,6 +103,8 @@ Endpoint administrativo `GET /api/admin/health/deps` que agrega el estado hoy
 disperso (`maps.available`, `maps.installed`, `geocoder.installed`,
 `translate/available`) en una sola respuesta, con lo que necesita la tarjeta:
 
+```
+
 ```json
 {
   "capabilities": [
@@ -136,16 +138,11 @@ disperso (`maps.available`, `maps.installed`, `geocoder.installed`,
 }
 ```
 
-En el Panel: sección "Estado del sistema" con una fila/tarjeta por capacidad.
-Verde = lista. Ámbar = falta algo, con el detalle y, si `installable: true`, el
-botón **Instalar** (mockup en §0).
+En el Panel: una sección "Estado del sistema" con una fila/tarjeta por capacidad. Verde = lista. Ámbar = falta algo, con el detalle y, si `installable: true`, el botón **Instalar** (mockup en §0).
 
-## 5. Pilar 2 — Manifiesto y auto-instalación
+## 5. Pilar 2 — Manifiesto de dependencias y auto-instalación
 
-### 5.1 Manifiesto
-
-Fichero versionado en el repo: `dependencies.json`. Declara cada herramienta
-descargable, con URL, checksum y destino por plataforma.
+Fichero versionado en el repositorio: `dependencies.json` (o `library-server/dependencies.json`). Declara cada herramienta descargable, con URL, checksum y destino por plataforma.
 
 ```json
 {
@@ -175,8 +172,7 @@ descargable, con URL, checksum y destino por plataforma.
 - `dest` es relativo al directorio del binario del Core (donde `findMapTool`
   busca).
 - `sha256_binary` verifica tras extraer, no solo el archivo.
-- Los valores de `pmtiles` son reales (v1.31.1, Linux arm64). Al añadir Windows y
-  Linux x86 se completan sus entradas con sus checksums.
+- Los valores de `pmtiles` son reales (v1.31.1, Linux arm64), tomados de la instalación de esta sesión; al añadir Windows y Linux x86 se completan sus entradas con sus checksums.
 
 ### 5.2 Instalador
 
@@ -191,54 +187,11 @@ Endpoint administrativo `POST /api/admin/deps/install` `{ "id": "pmtiles" }`:
 
 La alternativa manual (§6) sigue siendo respaldo válido.
 
-### 5.3 Fuentes de datos (no binarios)
-
-Las descargas de datos (planet PMTiles por región, GeoNames, ZIMs) **ya tienen URL
-por defecto y flujo en el Panel**. Solo hay que asegurar que el Doctor refleje su
-estado y que las atribuciones se muestren (§7).
-
-## 6. Instalación base por sistema (fina, sin fricción)
-
-El instalador base **solo** hace: copiar binarios, colocar `www-client`,
-`www-panel`, `maps-www`; registrar el servicio; arrancar. **No** instala motores
-(eso es el botón). Defaults sin preguntas.
-
-- **Windows:** el `install-all-in-one.ps1` actual ya cubre el arranque (servicio +
-  interfaces) con defaults. Un `.msi` (WiX/Inno) más pulido es mejora posterior, no
-  requisito.
-- **Linux (lo que falta hoy):** `scripts/install.sh` + `scripts/build.sh` que
-  compilen las piezas Go, ensamblen `www-*`, y registren una unidad **systemd**
-  (equivalente del servicio Windows). Ruta fija FHS (`/opt/nimos-library`), pool
-  configurable (`/var/lib/nimos-library` por env del systemd). Un `.deb` es la
-  evolución natural; el `install.sh` es el mínimo viable.
-
-### Caso especial honesto: traducción en ARM
-
-`translateLocally` publica binarios oficiales para Windows, macOS (incl. Apple
-Silicon) y Linux x86_64, pero **no para Linux-ARM64** (la Pi). El motor por debajo
-(Bergamot/Marian) **sí corre en ARM** — Firefox traduce en móviles ARM con esa
-tecnología — pero eso es **compilarlo**, no descargarlo. Por tanto:
-
-- En Windows y Linux x86: el botón [Instalar] funciona.
-- En Linux-ARM64: el Doctor marca `installable: false` con la nota "usar motor
-  remoto (`TRANSLATE_URL`)". Compilar Bergamot/Marian para ARM64 y empaquetarlo es
-  un proyecto aparte (§9, fuera de alcance de este plan).
-
-### Referencia manual (mientras no exista `install.sh`)
-
-```bash
-# Panel  -> core/www-panel ; Cliente PWA -> core/www-client
-( cd library-server/panel && npm install && npm run build )
-( cd nimos-library && npm install && npm run build ) && cp -r nimos-library/dist library-server/core/www-client
-
 # Core y Supervisor
 ( cd library-server/core && go build -o library-server . )
 ( cd library-server/supervisor && go build -o library-supervisor . )
 
-# 'pmtiles' junto a library-server (mismo directorio) — o instalarlo desde el Panel
-```
-
-Arranque con pool y bind reales:
+# Herramienta de mapas (ejemplo linux/arm64, v1.31.1) — colocar el binario 'pmtiles' junto a library-server (mismo directorio) — o instalarlo desde el Panel
 
 ```bash
 POOL_ROOT=/ruta/al/pool ZIM_ENGINE=native PORT=8090 BIND=0.0.0.0 \
@@ -292,6 +245,3 @@ que es exactamente lo que hacen los gestores maduros.
 - **`.msi`/`.deb` pulidos con asistente gráfico y elección de ruta:** mejora
   posterior. El `install-all-in-one.ps1` (Windows) y `install.sh`+systemd (Linux)
   cubren el arranque sin fricción; el botón del Panel cubre los motores.
-- **Empaquetado nativo (Wails) para Linux:** en Linux la experiencia de app es la
-  PWA servida en `/`.
-```
