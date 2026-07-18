@@ -53,6 +53,32 @@ func env(k, def string) string {
 	return def
 }
 
+// defaultTranslateBin resuelve el binario translateLocally SIN rutas de máquina.
+// Orden: TRANSLATE_BIN explícito > junto a este ejecutable (siblingDir, donde el
+// aprovisionamiento del Panel coloca la herramienta, igual que pmtiles con el Core)
+// > en el PATH del sistema. Como último recurso devuelve el nombre a secas para que
+// exec falle con un error legible. Antes había aquí una ruta absoluta del equipo de
+// compilación (`C:\Users\asus\...`), inservible en cualquier otra máquina.
+func defaultTranslateBin() string {
+	name := "translateLocally"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if v := strings.TrimSpace(os.Getenv("TRANSLATE_BIN")); v != "" {
+		return v
+	}
+	if exe, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(exe), name)
+		if st, statErr := os.Stat(cand); statErr == nil && !st.IsDir() {
+			return cand
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return name
+}
+
 func engineCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command(bin, args...)
 	if modelsDir == "" {
@@ -412,7 +438,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func main() {
-	bin = env("TRANSLATE_BIN", `C:\Users\asus\nimos-tools\translate\translateLocally.exe`)
+	bin = defaultTranslateBin()
 	modelsDir = strings.TrimSpace(os.Getenv("MODELS_DIR"))
 	if modelsDir != "" {
 		absolute, err := filepath.Abs(modelsDir)
