@@ -158,7 +158,7 @@
   onMount(async () => {
     initShell(); // ¿corremos dentro de la app de escritorio? (window.runtime de Wails)
     newTab();
-    refreshAuth(); // sesión actual (para la cuenta del sidebar)
+    await refreshAuth(); // fija identidad antes de cargar estado personal
     try { libraries = await getLibraries(); } catch (e) { /* motor caído: home vacío */ }
     // Favoritos desde el shim (SQLite); migra una vez los de localStorage si existían.
     try {

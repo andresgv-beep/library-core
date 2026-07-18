@@ -11,8 +11,8 @@ import (
 // API de gestión persistida (DESIGN §7). Escrituras (POST/PUT/DELETE) exigen
 // token si NIMOS_TOKEN está configurado (auth por canal, §6 · lo hace el middleware).
 //
-// El estado personal se scopea por usuario: cada cuenta ve/edita el suyo; el
-// anónimo comparte el "invitado" (currentUsername → "").
+// El estado personal se scopea por identidad: cada cuenta ve/edita el suyo y
+// cada navegador anónimo recibe una clave guest:<id> independiente.
 
 func errmap(err error) map[string]string { return map[string]string{"error": err.Error()} }
 func now() int64                         { return time.Now().Unix() }

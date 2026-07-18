@@ -47,7 +47,8 @@ func (s *Server) imageSearch(media *mediaDeps, w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer s.releaseSearch()
-	libs, err := s.visibleLibs(s.currentUser(r)) // solo colecciones con acceso
+	user := s.currentUser(r)
+	libs, err := s.visibleLibs(user) // solo colecciones con acceso
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -107,7 +108,11 @@ func (s *Server) imageSearch(media *mediaDeps, w http.ResponseWriter, r *http.Re
 	// Media primero cuando casa: logo del canal + portadas de vídeos (buscar un
 	// autor saca su logo y las portadas de sus vídeos).
 	if media != nil {
-		if mi, mErr := media.searchImages(q); mErr == nil {
+		access := s.accessMap()
+		visible := func(it mediaItem) bool {
+			return canSeeCached(user, access, collectionIDForMedia(it.Collection))
+		}
+		if mi, mErr := media.searchImages(q, visible); mErr == nil {
 			out = append(out, mi...)
 		}
 	}

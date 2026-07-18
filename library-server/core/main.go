@@ -461,6 +461,9 @@ func main() {
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		// Identidad estable y aislada para favoritos/notas/historial del invitado.
+		// No concede permisos: currentUser sigue siendo nil hasta iniciar sesión.
+		r = s.withGuestIdentity(w, r)
 
 		// El cliente separado usa orígenes explícitos. Loopback queda habilitado
 		// para desarrollo; producción se configura con CLIENT_ORIGINS.

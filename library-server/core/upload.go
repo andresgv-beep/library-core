@@ -285,19 +285,19 @@ func (s *Server) handleUpload(u *uploadDeps) http.HandlerFunc {
 			duration = d
 		}
 		sc := sidecar{
-			Template:    template,
-			Media:       filename,
-			Title:       firstNonEmpty(strings.TrimSpace(r.FormValue("title")), titleFromFilename(filename)),
-			Author:      author,
-			Date:        strings.TrimSpace(r.FormValue("date")),
-			Description: strings.TrimSpace(r.FormValue("description")),
-			Tags:        tags,
-			Keywords:    keywordsFromSubjects(tags),
-			Source:      source,
-			SourceURL:   strings.TrimSpace(r.FormValue("source_url")),
-			Language:    strings.TrimSpace(r.FormValue("language")),
-			Contributor: strings.TrimSpace(r.FormValue("contributor")),
-			License:     strings.TrimSpace(r.FormValue("license")),
+			Template:      template,
+			Media:         filename,
+			Title:         firstNonEmpty(strings.TrimSpace(r.FormValue("title")), titleFromFilename(filename)),
+			Author:        author,
+			Date:          strings.TrimSpace(r.FormValue("date")),
+			Description:   strings.TrimSpace(r.FormValue("description")),
+			Tags:          tags,
+			Keywords:      keywordsFromSubjects(tags),
+			Source:        source,
+			SourceURL:     strings.TrimSpace(r.FormValue("source_url")),
+			Language:      strings.TrimSpace(r.FormValue("language")),
+			Contributor:   strings.TrimSpace(r.FormValue("contributor")),
+			License:       strings.TrimSpace(r.FormValue("license")),
 			Cover:         cover,
 			ChannelAvatar: channelAvatar,
 			Duration:      duration,
@@ -318,12 +318,12 @@ func (s *Server) handleUpload(u *uploadDeps) http.HandlerFunc {
 		})
 
 		// Visibilidad: la colección nueva nace con el nivel elegido (por defecto
-		// ABIERTA, para que lo subido se vea sin pasar por Colecciones). Si la
+		// BLOQUEADA, para no publicar por accidente). Si la
 		// colección ya tenía nivel (subidas previas), se respeta (DO NOTHING).
 		if s.store != nil && s.store.db != nil {
 			access := strings.TrimSpace(r.FormValue("access"))
 			if !validAccess(access) {
-				access = "open"
+				access = "blocked"
 			}
 			cid := collectionIDForMedia(appDir + "/" + collection)
 			_, _ = s.store.db.Exec(`

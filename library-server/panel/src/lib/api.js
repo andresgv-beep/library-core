@@ -57,8 +57,8 @@ export const cancelMapStreetIndex = () =>
 
 // ── Auth / usuarios ──
 export const authMe = () => getJSON('/api/auth/me').catch(() => ({ setupNeeded: false, user: null }))
-export const authRegister = (username, password, age) =>
-  postJSON('/api/auth/register', { username, password, age })
+export const authRegister = (username, password, age, setupToken = '') =>
+  postJSON('/api/auth/register', { username, password, age, setupToken })
 export const authLogin = (username, password) => postJSON('/api/auth/login', { username, password })
 export const authLogout = () => postJSON('/api/auth/logout', {})
 export const listUsers = () => getJSON('/api/admin/users').then((d) => d.users || [])

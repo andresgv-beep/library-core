@@ -58,8 +58,15 @@ func (s *Server) handleGlobalSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []SearchGroup{})
 		return
 	}
-	// Cache: repetir una búsqueda no golpea el motor ni consume slot del gate.
-	cacheKey := normalizeText(q)
+	// La visibilidad forma parte de la clave. Antes se cacheaba solo por texto:
+	// una búsqueda hecha por el admin podía reutilizarse después para un invitado
+	// y revelar títulos/snippets de colecciones bloqueadas.
+	libs, err := s.visibleLibs(s.currentUser(r))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	cacheKey := searchVisibilityCacheKey(q, libs)
 	if data, ok := s.searchCache.get(cacheKey); ok {
 		writeCachedJSON(w, data)
 		return
@@ -70,12 +77,6 @@ func (s *Server) handleGlobalSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.releaseSearch()
 	perLib := 8
-
-	libs, err := s.visibleLibs(s.currentUser(r)) // no buscar en colecciones sin acceso
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
-	}
 
 	groups := make([]SearchGroup, len(libs))
 	var wg sync.WaitGroup
@@ -103,6 +104,15 @@ func (s *Server) handleGlobalSearch(w http.ResponseWriter, r *http.Request) {
 	data, _ := json.Marshal(out)
 	s.searchCache.set(cacheKey, data)
 	writeCachedJSON(w, data)
+}
+
+func searchVisibilityCacheKey(q string, libs []Library) string {
+	visible := make([]string, 0, len(libs))
+	for _, lib := range libs {
+		visible = append(visible, lib.ID)
+	}
+	sort.Strings(visible)
+	return normalizeText(q) + "\x00" + strings.Join(visible, "\x1f")
 }
 
 func (s *Server) searchOne(lib Library, q string, limit int) SearchGroup {

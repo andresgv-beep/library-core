@@ -150,6 +150,71 @@ func TestRequestSessionTokenSupportsSeparatedClient(t *testing.T) {
 	}
 }
 
+func TestQuerySessionTokenIsLimitedToNativeMediaReads(t *testing.T) {
+	for _, tc := range []struct {
+		method, path, want string
+	}{
+		{http.MethodGet, "/media/Publico/video.mp4?st=query-token", "query-token"},
+		{http.MethodHead, "/content/wiki/A/Portada?st=query-token", "query-token"},
+		{http.MethodGet, "/api/admin/users?st=query-token", ""},
+		{http.MethodPost, "/media/Publico/video.mp4?st=query-token", ""},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		if got := requestSessionToken(req); got != tc.want {
+			t.Errorf("%s %s: token=%q, quiero %q", tc.method, tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestAnonymousBrowsersReceiveIsolatedIdentities(t *testing.T) {
+	s := testAuthServer(t, "")
+	resolve := func(cookie *http.Cookie) (string, *http.Cookie) {
+		req := httptest.NewRequest(http.MethodGet, "/api/favorites", nil)
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		req = s.withGuestIdentity(rec, req)
+		name := s.currentUsername(req)
+		cookies := rec.Result().Cookies()
+		if cookie != nil {
+			return name, cookie
+		}
+		if len(cookies) != 1 {
+			t.Fatalf("quiero una cookie de invitado, tengo %d", len(cookies))
+		}
+		return name, cookies[0]
+	}
+
+	first, firstCookie := resolve(nil)
+	second, _ := resolve(nil)
+	again, _ := resolve(firstCookie)
+	if first == "" || second == "" || first == second {
+		t.Fatalf("invitados no aislados: first=%q second=%q", first, second)
+	}
+	if again != first {
+		t.Fatalf("la identidad invitada no es estable: %q != %q", again, first)
+	}
+}
+
+func TestRemoteBootstrapRequiresSetupCode(t *testing.T) {
+	s := testAuthServer(t, "")
+	t.Setenv("NIMOS_SETUP_TOKEN", "codigo-seguro")
+	remote := httptest.NewRequest(http.MethodPost, "/api/auth/register", nil)
+	remote.RemoteAddr = "192.168.1.25:45000"
+	if s.setupAllowed(remote, "") {
+		t.Fatal("el bootstrap remoto no debe pasar sin código")
+	}
+	if !s.setupAllowed(remote, "codigo-seguro") {
+		t.Fatal("el bootstrap remoto debe aceptar el código configurado")
+	}
+	local := httptest.NewRequest(http.MethodPost, "/api/auth/register", nil)
+	local.RemoteAddr = "127.0.0.1:45000"
+	if !s.setupAllowed(local, "") {
+		t.Fatal("el bootstrap local debe seguir funcionando sin código")
+	}
+}
+
 func TestClientOriginsAreExplicit(t *testing.T) {
 	t.Setenv("CLIENT_ORIGINS", "https://client.example, http://192.168.1.20:4173")
 	if !clientOriginAllowed("https://client.example") {
@@ -334,5 +399,25 @@ func TestLoginLimiterBacksOff(t *testing.T) {
 	l.reset(ip)
 	if _, blocked := l.blocked(ip); blocked {
 		t.Fatal("reset debería limpiar el bloqueo")
+	}
+}
+
+func TestClientIPIgnoresForwardedHeaderByDefault(t *testing.T) {
+	t.Setenv("TRUST_PROXY", "")
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	r.RemoteAddr = "192.0.2.10:4321"
+	r.Header.Set("X-Forwarded-For", "203.0.113.99")
+	if got := clientIP(r); got != "192.0.2.10" {
+		t.Fatalf("clientIP = %q; debe usar la conexion directa sin TRUST_PROXY", got)
+	}
+}
+
+func TestClientIPHonorsForwardedHeaderForTrustedProxy(t *testing.T) {
+	t.Setenv("TRUST_PROXY", "1")
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	r.RemoteAddr = "192.0.2.10:4321"
+	r.Header.Set("X-Forwarded-For", "203.0.113.99, 192.0.2.20")
+	if got := clientIP(r); got != "203.0.113.99" {
+		t.Fatalf("clientIP = %q; debe tomar el primer salto con TRUST_PROXY=1", got)
 	}
 }

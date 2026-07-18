@@ -6,6 +6,7 @@
   let username = $state('')
   let password = $state('')
   let confirm = $state('')
+  let setupToken = $state('')
   let err = $state('')
   let busy = $state(false)
 
@@ -19,7 +20,7 @@
     busy = true
     try {
       const r = setupNeeded
-        ? await authRegister(username.trim(), password, 0) // el admin no tiene edad
+        ? await authRegister(username.trim(), password, 0, setupToken.trim()) // local: opcional; LAN: obligatorio
         : await authLogin(username.trim(), password)
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'error')
       onDone?.()
@@ -49,6 +50,7 @@
     <label>Contraseña<input type="password" bind:value={password} autocomplete={setupNeeded ? 'new-password' : 'current-password'} required /></label>
     {#if setupNeeded}
       <label>Repetir contraseña<input type="password" bind:value={confirm} autocomplete="new-password" required /></label>
+      <label>Código de configuración <span>(solo acceso remoto)</span><input type="password" bind:value={setupToken} autocomplete="one-time-code" /></label>
     {/if}
 
     {#if err}<div class="login-err">{err}</div>{/if}
@@ -65,6 +67,7 @@
   .login-card h2 { font-size: 17px; color: var(--ink); }
   .login-sub { font-size: 12px; color: var(--ink-mute); line-height: 1.5; margin-bottom: 4px; }
   .login-card label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
+  .login-card label span { font-size: 9px; letter-spacing: 0; text-transform: none; color: var(--ink-mute); }
   .login-card input { background: var(--window-bg); border: 1px solid var(--line-bright); border-radius: 7px; padding: 9px 11px; font-size: 13px; color: var(--ink); text-transform: none; letter-spacing: normal; }
   .login-card input:focus { border-color: var(--signal-border); }
   .login-err { font-size: 12px; color: var(--crit); background: var(--crit-dim); border: 1px solid var(--crit-border); border-radius: 7px; padding: 8px 10px; }

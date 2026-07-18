@@ -23,7 +23,7 @@
   let language = $state(item?.language || '')
   let contributor = $state(item?.contributor || '')
   let license = $state(item?.license || '')
-  let access = $state(editing ? '' : 'open') // '' en edición = mantener nivel actual
+  let access = $state(editing ? '' : 'blocked') // alta segura; '' en edición = mantener nivel actual
 
   let busy = $state(false)
   let err = $state('')

@@ -573,7 +573,7 @@ func (m *mediaDeps) search(q string) ([]FederatedSearchResult, error) {
 // searchImages alimenta el buscador de IMÁGENES del home con media: el LOGO del
 // canal (avatar) de cada canal que casa + la PORTADA de cada vídeo que casa. Así
 // buscar un autor saca su logo y las portadas de todos sus vídeos.
-func (m *mediaDeps) searchImages(q string) ([]ImageHit, error) {
+func (m *mediaDeps) searchImages(q string, visible func(mediaItem) bool) ([]ImageHit, error) {
 	items, err := m.scan("")
 	if err != nil {
 		return nil, err
@@ -586,6 +586,9 @@ func (m *mediaDeps) searchImages(q string) ([]ImageHit, error) {
 	}
 	var matched []scored
 	for _, it := range items {
+		if visible != nil && !visible(it) {
+			continue
+		}
 		score, ok := mediaMatch(q, nq, qTokens, it) // mismo criterio que la búsqueda de texto
 		if !ok {
 			continue

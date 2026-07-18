@@ -28,11 +28,13 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +46,7 @@ import (
 
 const (
 	sessionCookie = "nimos_session"
+	guestCookie   = "nimos_guest"
 	// sessionTTL: caducidad REAL, comprobada en servidor. El MaxAge de la cookie
 	// solo es una sugerencia al navegador; el token de la DB es el que manda.
 	sessionTTL = 30 * 24 * time.Hour
@@ -65,12 +68,47 @@ func machineUser() *User { return &User{ID: -1, Username: "nimos", Age: 999, IsA
 
 type ctxKey int
 
-const ctxUserKey ctxKey = 0
+const (
+	ctxUserKey  ctxKey = 0
+	ctxGuestKey ctxKey = 1
+)
 
 // withUser mete el usuario ya resuelto en el contexto: los handlers que están
 // detrás de requireAdmin no vuelven a pegarle a SQLite en cada comprobación.
 func withUser(r *http.Request, u *User) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), ctxUserKey, u))
+}
+
+// withGuestIdentity garantiza que cada navegador anónimo tenga un espacio
+// personal distinto. La cookie solo contiene un identificador aleatorio; no
+// concede acceso a colecciones ni sustituye una sesión de usuario.
+func (s *Server) withGuestIdentity(w http.ResponseWriter, r *http.Request) *http.Request {
+	id := ""
+	if c, err := r.Cookie(guestCookie); err == nil && validGuestID(c.Value) {
+		id = c.Value
+	}
+	if id == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			return r
+		}
+		id = hex.EncodeToString(b)
+		secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+		http.SetCookie(w, &http.Cookie{
+			Name: guestCookie, Value: id, Path: "/", HttpOnly: true,
+			Secure: secure, SameSite: http.SameSiteLaxMode,
+			MaxAge: 365 * 24 * 60 * 60,
+		})
+	}
+	return r.WithContext(context.WithValue(r.Context(), ctxGuestKey, id))
+}
+
+func validGuestID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil
 }
 
 // ── Consultas de usuarios/sesiones ─────────────────────────────────────────
@@ -275,18 +313,28 @@ func requestSessionToken(r *http.Request) string {
 	// no pueden mandar la cabecera Authorization y, cross-origin (cliente en otro
 	// puerto/host), tampoco siempre la cookie: el token viaja en la query (?st=).
 	// Lo usa el cliente solo para /media y /content. Contrato de auth §6.4.
-	if st := r.URL.Query().Get("st"); st != "" {
-		return st
+	mediaRead := (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		(strings.HasPrefix(r.URL.Path, "/media/") || strings.HasPrefix(r.URL.Path, "/content/"))
+	if mediaRead {
+		if st := r.URL.Query().Get("st"); st != "" {
+			return st
+		}
 	}
 	return ""
 }
 
-// currentUsername devuelve el usuario de la sesión, o "" para anónimo (invitado).
-// El estado personal (favoritos/notas/historial/tags) se scopea con esta clave:
-// cada cuenta el suyo; el anónimo comparte el "invitado" ("").
+// currentUsername devuelve una clave aislada para la cuenta o navegador actual.
+// Los invitados usan una identidad opaca creada por withGuestIdentity, por lo que
+// dos navegadores anónimos no comparten favoritos, notas, historial ni etiquetas.
 func (s *Server) currentUsername(r *http.Request) string {
 	if u := s.currentUser(r); u != nil {
 		return u.Username
+	}
+	if id, ok := r.Context().Value(ctxGuestKey).(string); ok && validGuestID(id) {
+		return "guest:" + id
+	}
+	if c, err := r.Cookie(guestCookie); err == nil && validGuestID(c.Value) {
+		return "guest:" + c.Value
 	}
 	return ""
 }
@@ -404,10 +452,11 @@ func (s *Server) registerAdminUserRoutes(mux *http.ServeMux) {
 }
 
 type credsReq struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Age      int    `json:"age"`
-	IsAdmin  bool   `json:"isAdmin"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	Age        int    `json:"age"`
+	IsAdmin    bool   `json:"isAdmin"`
+	SetupToken string `json:"setupToken,omitempty"`
 }
 
 // POST /api/auth/register — bootstrap: solo funciona si NO hay usuarios; crea el
@@ -422,6 +471,16 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body inválido"})
 		return
 	}
+	// Evita calcular bcrypt en cada petición anónima una vez terminado el setup.
+	// La inserción atómica de createFirstAdmin sigue siendo la autoridad final.
+	if s.userCount() != 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "ya hay usuarios; el admin crea las cuentas"})
+		return
+	}
+	if !s.setupAllowed(r, req.SetupToken) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "el alta inicial remota requiere el código de configuración"})
+		return
+	}
 	u, err := s.createFirstAdmin(req.Username, req.Password, req.Age) // atómico
 	if err != nil {
 		writeInputError(w, err)
@@ -434,6 +493,37 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setSessionCookie(w, r, token)
 	writeJSON(w, http.StatusCreated, map[string]any{"user": u, "sessionToken": token})
+}
+
+// setupAllowed permite el bootstrap directamente desde el propio equipo. Si la
+// instalación se expone por LAN/proxy, exige NIMOS_SETUP_TOKEN (o el carril de
+// máquina) para que un visitante no pueda apropiarse del primer administrador.
+func (s *Server) setupAllowed(r *http.Request, provided string) bool {
+	if s.hasMachineToken(r) || requestIsLocal(r) {
+		return true
+	}
+	expected := strings.TrimSpace(os.Getenv("NIMOS_SETUP_TOKEN"))
+	provided = strings.TrimSpace(provided)
+	return expected != "" && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
+}
+
+func requestIsLocal(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	// Un proxy local conserva RemoteAddr=loopback, pero X-Forwarded-For revela
+	// que el navegador real está fuera. En ese caso sigue haciendo falta código.
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		first, _, _ := strings.Cut(xff, ",")
+		forwarded := net.ParseIP(strings.TrimSpace(first))
+		return forwarded != nil && forwarded.IsLoopback()
+	}
+	return true
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -535,8 +625,9 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAdminUserOp maneja las operaciones sobre una cuenta concreta:
-//   DELETE /api/admin/users/{id}           → borrar
-//   PUT    /api/admin/users/{id}/password  → restablecer contraseña (reset por admin)
+//
+//	DELETE /api/admin/users/{id}           → borrar
+//	PUT    /api/admin/users/{id}/password  → restablecer contraseña (reset por admin)
 func (s *Server) handleAdminUserOp(w http.ResponseWriter, r *http.Request) {
 	me := s.currentUser(r)
 	if me == nil || !me.IsAdmin {
@@ -663,6 +754,7 @@ const (
 type loginAttempt struct {
 	fails int
 	next  time.Time // instante a partir del cual se permite el siguiente intento
+	last  time.Time // permite retirar IPs antiguas y acotar el mapa en memoria
 }
 
 type ipLimiter struct {
@@ -677,6 +769,9 @@ func (l *ipLimiter) blocked(ip string) (time.Duration, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	a := l.m[ip]
+	if a == nil && len(l.m) >= 4096 {
+		a = l.m["__overflow__"]
+	}
 	if a == nil {
 		return 0, false
 	}
@@ -691,11 +786,28 @@ func (l *ipLimiter) blocked(ip string) (time.Duration, bool) {
 func (l *ipLimiter) fail(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := time.Now()
+	if len(l.m) >= 1024 {
+		for key, old := range l.m {
+			if now.Sub(old.last) > 30*time.Minute {
+				delete(l.m, key)
+			}
+		}
+	}
 	a := l.m[ip]
 	if a == nil {
-		a = &loginAttempt{}
-		l.m[ip] = a
+		// Límite duro: una oleada de IPs no puede hacer crecer el proceso sin fin.
+		// Las direcciones adicionales comparten un bucket, pero no quedan libres.
+		if len(l.m) >= 4096 {
+			ip = "__overflow__"
+			a = l.m[ip]
+		}
+		if a == nil {
+			a = &loginAttempt{}
+			l.m[ip] = a
+		}
 	}
+	a.last = now
 	a.fails++
 	over := a.fails - loginFreeTries
 	if over <= 0 {
@@ -715,15 +827,17 @@ func (l *ipLimiter) reset(ip string) {
 	l.mu.Unlock()
 }
 
-// clientIP saca la IP del cliente. Detrás de Caddy viene en X-Forwarded-For (el
-// primer valor es el cliente original); si no, RemoteAddr. Se usa solo para el
-// rate-limit, no para autorización, así que la confianza en el header es aceptable.
+// clientIP solo confía en X-Forwarded-For cuando el despliegue declara
+// TRUST_PROXY=1. Aceptarlo de cualquiera permitía rotar una cabecera falsa para
+// saltarse el limitador y llenar su mapa de IPs.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
+	if os.Getenv("TRUST_PROXY") == "1" {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if i := strings.IndexByte(xff, ','); i >= 0 {
+				return strings.TrimSpace(xff[:i])
+			}
+			return strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

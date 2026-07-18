@@ -139,3 +139,29 @@ func TestHandleUpload_Rejects(t *testing.T) {
 		t.Errorf("pdf válido a cabinet → %d, quería 200", got)
 	}
 }
+
+func TestHandleUploadDefaultsToBlocked(t *testing.T) {
+	root := t.TempDir()
+	s := testAuthServer(t, "")
+	h := s.handleUpload(&uploadDeps{root: root})
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	mw.WriteField("source", "cabinet")
+	mw.WriteField("collection", "Privada")
+	mw.WriteField("title", "Documento interno")
+	fw, _ := mw.CreateFormFile("file", "interno.pdf")
+	fw.Write([]byte("%PDF fake"))
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/admin/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if cfg := s.collectionAccess(collectionIDForMedia("Cabinet/Privada")); cfg.Access != "blocked" {
+		t.Fatalf("una subida sin visibilidad nació %q, quería blocked", cfg.Access)
+	}
+}

@@ -84,9 +84,11 @@ para una segunda fase.
 
 ---
 
-## Endpoint (a implementar)
+## Endpoint — ✅ IMPLEMENTADO (verificado 2026-07-18)
 
-`POST /api/upload` (multipart, admin): recibe fichero(s) + campos → guarda en
-`pool/<colección>/`, escribe `<fichero>.json` (sidecar) y `collection.json` si
-falta. Reusa `templateForExt` + `writeJSONFileIfAbsent`. El escáner lo recoge y
-el buscador lo indexa igual que el resto del pool.
+`POST /api/admin/upload` (multipart, admin — ruta real; este doc decía antes
+`/api/upload`). Registrado en `library-server/core/main.go:345` →
+`handleUpload` (`library-server/core/upload.go`). Recibe fichero(s) + campos →
+guarda en `pool/<colección>/`, escribe `<fichero>.json` (sidecar) y
+`collection.json` si falta. Reusa `templateForExt` + `writeJSONFileIfAbsent`. El
+escáner lo recoge y el buscador lo indexa igual que el resto del pool.

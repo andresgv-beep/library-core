@@ -1,5 +1,15 @@
 # Especificación técnica: búsqueda geográfica integrada en Library
 
+> ## ✅ IMPLEMENTADA (verificado 2026-07-18)
+> El grueso de esta spec está en el código. **Core:** `/api/maps/search` cableado
+> en `library-server/core/main.go:253` → `handleMapSearch`
+> (`library-server/core/maps_search.go`, con `maps_search_test.go`). **Cliente:**
+> `nimos-library/src/lib/LocationSearchResult.svelte`, `MiniMap.svelte` y
+> `maplibreLoader.js` existen. Se conserva la spec como contrato de referencia;
+> no se ha re-verificado en esta pasada cada criterio de aceptación §13 (radio,
+> degradación, i18n) — solo la presencia de las piezas.
+
+
 ## 1. Objetivo
 
 Cuando el usuario busca en la pantalla principal de Library una calle, ciudad, código postal o lugar reconocible por el mapa offline, la vista de resultados debe combinar dos carriles independientes:

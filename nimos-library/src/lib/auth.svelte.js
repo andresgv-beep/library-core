@@ -3,6 +3,7 @@
 // cerramos sesión, y sabemos quién somos para pintar la cuenta.
 
 import { serverFetch, setSessionToken, serverUrl } from './connection.js';
+import { syncLocalIdentity } from './localIdentity.js';
 
 export const auth = $state({ user: null, setupNeeded: false, loaded: false });
 
@@ -19,6 +20,7 @@ export async function refreshAuth() {
     const d = await r.json();
     auth.user = d.user || null;
     auth.setupNeeded = !!d.setupNeeded;
+    if (syncLocalIdentity(auth.user)) setTimeout(() => window.location.reload(), 0);
   } catch (e) {
     auth.user = null;
   }
@@ -34,13 +36,17 @@ export async function login(username, password) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'no se pudo entrar');
   const data = await r.json();
   setSessionToken(data.sessionToken || '');
+  const identityChanged = syncLocalIdentity(data.user || null);
   await refreshAuth();
+  if (identityChanged) setTimeout(() => window.location.reload(), 0);
 }
 
 export async function logout() {
   await serverFetch('/api/auth/logout', { method: 'POST' });
   setSessionToken('');
+  const identityChanged = syncLocalIdentity(null);
   await refreshAuth();
+  if (identityChanged) setTimeout(() => window.location.reload(), 0);
 }
 
 // changePassword: el usuario cambia SU propia contraseña. Exige la actual (no es

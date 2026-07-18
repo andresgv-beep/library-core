@@ -49,3 +49,17 @@ CLIENT_ORIGINS=http://localhost:5173,https://library-client.example
 ```
 
 No use un comodin cuando haya credenciales.
+
+## Alta inicial y proxy
+
+El primer administrador puede crearse sin código desde el mismo equipo. Si Core
+se publica en la LAN (`BIND=0.0.0.0`), configure un código de un solo uso antes
+de abrir el Panel desde otro dispositivo:
+
+```text
+NIMOS_SETUP_TOKEN=un-codigo-largo-y-aleatorio
+```
+
+`X-Forwarded-For` solo se usa para limitar intentos de acceso cuando se declara
+`TRUST_PROXY=1`. Actívelo únicamente detrás de un proxy que reemplace esa
+cabecera; nunca cuando el cliente pueda escribirla directamente.
