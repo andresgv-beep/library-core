@@ -88,6 +88,12 @@ func (s *shell) installProxy(target *url.URL) {
 	proxy.Director = func(r *http.Request) {
 		originalDirector(r)
 		r.Host = target.Host
+		// El WebView habla con el gateway en su origen interno. Al reenviar al
+		// servidor, normalizamos Origin al destino para que la defensa CSRF pueda
+		// distinguir este proxy legítimo de una web hostil.
+		if r.Header.Get("Origin") != "" {
+			r.Header.Set("Origin", target.Scheme+"://"+target.Host)
+		}
 		// Garantiza que ModifyResponse pueda inspeccionar el HTML de la SPA.
 		r.Header.Del("Accept-Encoding")
 	}

@@ -23,6 +23,7 @@ function initialBase() {
 }
 
 let serverBase = initialBase();
+let mediaToken = '';
 
 export function getServerBase() {
   return serverBase;
@@ -33,7 +34,10 @@ export function setServerBase(value) {
   // distinto de vacio haria que /content saliese del origen interno de Wails.
   if (typeof window !== 'undefined' && window.__NIMOS_LIBRARY_SHELL__) return serverBase;
   const next = normalizeBase(value);
-  if (next !== serverBase) setSessionToken('');
+  if (next !== serverBase) {
+    setSessionToken('');
+    setMediaToken('');
+  }
   serverBase = next;
   try {
     if (serverBase) localStorage.setItem(STORAGE_KEY, serverBase);
@@ -85,10 +89,14 @@ export function serverUrl(path) {
 // la cabecera Authorization y, cross-origin, tampoco siempre la cookie. Solo esas
 // dos rutas (no /api, que va por Bearer) para no filtrar el token de más.
 function withMediaToken(fullUrl, path) {
-  const token = getSessionToken();
+	const token = mediaToken;
   if (!token) return fullUrl;
   if (!path.startsWith('/media') && !path.startsWith('/content')) return fullUrl;
   return `${fullUrl}${fullUrl.includes('?') ? '&' : '?'}st=${encodeURIComponent(token)}`;
+}
+
+export function setMediaToken(token) {
+	mediaToken = String(token || '');
 }
 
 export function serverFetch(input, init = {}) {

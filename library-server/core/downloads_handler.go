@@ -241,8 +241,14 @@ func sanitizeFilename(name string) string {
 	}
 	// Nos quedamos solo con el último segmento, por si viene "a/b/c.pdf".
 	name = filepath.Base(name)
-	// Fuera separadores y control chars residuales.
-	name = strings.ReplaceAll(name, string(filepath.Separator), "")
+	// Fuera separadores, caracteres reservados de Windows y controles. En
+	// particular ':' impediría crear Alternate Data Streams (archivo:stream).
+	name = strings.Map(func(r rune) rune {
+		if r < 32 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return -1
+		}
+		return r
+	}, name)
 	name = strings.Trim(name, ". ")
 	return name
 }

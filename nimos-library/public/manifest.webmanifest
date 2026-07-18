@@ -1,7 +1,7 @@
 {
-  "name": "Nimos Library",
-  "short_name": "Library",
-  "description": "Tu biblioteca personal, servida por Library Server.",
+  "name": "Noumon",
+  "short_name": "Noumon",
+  "description": "Tu conocimiento. Sin límites. Offline.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

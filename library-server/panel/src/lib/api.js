@@ -61,6 +61,8 @@ export const authRegister = (username, password, age, setupToken = '') =>
   postJSON('/api/auth/register', { username, password, age, setupToken })
 export const authLogin = (username, password) => postJSON('/api/auth/login', { username, password })
 export const authLogout = () => postJSON('/api/auth/logout', {})
+export const authLogoutAll = () => postJSON('/api/auth/logout-all', {})
+export const authRefresh = () => postJSON('/api/auth/refresh', {})
 export const listUsers = () => getJSON('/api/admin/users').then((d) => d.users || [])
 export const createUser = (u) => postJSON('/api/admin/users', u)
 export const deleteUser = (id) =>

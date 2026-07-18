@@ -165,3 +165,63 @@ func TestHandleUploadDefaultsToBlocked(t *testing.T) {
 		t.Fatalf("una subida sin visibilidad nació %q, quería blocked", cfg.Access)
 	}
 }
+
+func TestHandleUploadRejectsActiveCoverAndUsesDetectedExtension(t *testing.T) {
+	post := func(t *testing.T, root, coverName string, coverBody []byte) *httptest.ResponseRecorder {
+		t.Helper()
+		h := (&Server{}).handleUpload(&uploadDeps{root: root})
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		mw.WriteField("source", "cabinet")
+		mw.WriteField("collection", "Segura")
+		fw, _ := mw.CreateFormFile("file", "documento.pdf")
+		fw.Write([]byte("%PDF fake"))
+		cw, _ := mw.CreateFormFile("cover", coverName)
+		cw.Write(coverBody)
+		mw.Close()
+		req := httptest.NewRequest("POST", "/api/admin/upload", &body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		return rec
+	}
+
+	badRoot := t.TempDir()
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)
+	if rec := post(t, badRoot, "ataque.svg", svg); rec.Code != 400 {
+		t.Fatalf("SVG activo: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(badRoot, "Cabinet", "Segura", "documento.pdf")); !os.IsNotExist(err) {
+		t.Fatal("una portada rechazada dejó el fichero principal huérfano")
+	}
+
+	goodRoot := t.TempDir()
+	png := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, make([]byte, 32)...)
+	if rec := post(t, goodRoot, "nombre-falso.svg", png); rec.Code != 200 {
+		t.Fatalf("PNG válido: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(goodRoot, "Cabinet", "Segura", "documento.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sc sidecar
+	if err := json.Unmarshal(raw, &sc); err != nil {
+		t.Fatal(err)
+	}
+	if sc.Cover != "documento.cover.png" {
+		t.Fatalf("cover=%q; debe usar la extensión detectada", sc.Cover)
+	}
+}
+
+func TestMultipartRequestHasRealSizeLimit(t *testing.T) {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	mw.WriteField("payload", string(bytes.Repeat([]byte("x"), 256)))
+	mw.Close()
+	req := httptest.NewRequest("POST", "/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	err := parseMultipartLimited(httptest.NewRecorder(), req, 64)
+	if err == nil || !maxBytesError(err) {
+		t.Fatalf("una petición sobre el límite no fue reconocida como demasiado grande: %v", err)
+	}
+}

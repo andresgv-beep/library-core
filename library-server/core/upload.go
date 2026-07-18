@@ -11,8 +11,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,6 +27,11 @@ import (
 type uploadDeps struct {
 	root string
 }
+
+const (
+	maxUploadRequest = int64(2 << 30) // vídeo/documento + imágenes y multipart
+	maxUpdateRequest = int64(64 << 20)
+)
 
 // appDirFor mapea el carril de la app a su carpeta en el pool. Las superficies
 // del lector (Moments/Cabinet) y brand.js esperan estos prefijos exactos.
@@ -73,7 +80,11 @@ func (s *Server) handleMediaUpdate(u *uploadDeps) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "método no permitido"})
 			return
 		}
-		if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if err := parseMultipartLimited(w, r, maxUpdateRequest); err != nil {
+			if maxBytesError(err) {
+				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "la actualización supera 64 MB"})
+				return
+			}
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "formulario inválido"})
 			return
 		}
@@ -121,10 +132,13 @@ func (s *Server) handleMediaUpdate(u *uploadDeps) http.HandlerFunc {
 		// Nuevas imágenes (opcionales): reemplazan las existentes.
 		if cf, ch, cerr := r.FormFile("cover"); cerr == nil {
 			base := strings.TrimSuffix(sc.Media, filepath.Ext(sc.Media))
-			name := base + ".cover" + strings.ToLower(filepath.Ext(sanitizeFilename(ch.Filename)))
-			if name == base+".cover" {
-				name = base + ".cover.jpg"
+			ext, verr := rasterUploadExtension(cf, ch)
+			if verr != nil {
+				cf.Close()
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "portada inválida: " + verr.Error()})
+				return
 			}
+			name := base + ".cover" + ext
 			dst := filepath.Join(dir, name)
 			_ = os.Remove(dst)
 			if saveMultipart(cf, dst) == nil {
@@ -132,10 +146,18 @@ func (s *Server) handleMediaUpdate(u *uploadDeps) http.HandlerFunc {
 			}
 			cf.Close()
 		}
-		if af, _, aerr := r.FormFile("channel_avatar"); aerr == nil {
+		if af, ah, aerr := r.FormFile("channel_avatar"); aerr == nil {
+			ext, verr := rasterUploadExtension(af, ah)
+			if verr != nil {
+				af.Close()
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "avatar inválido: " + verr.Error()})
+				return
+			}
 			avName := channelAvatarName(sc.Author)
 			if avName == "" {
-				avName = strings.TrimSuffix(sc.Media, filepath.Ext(sc.Media)) + ".channel.jpg"
+				avName = strings.TrimSuffix(sc.Media, filepath.Ext(sc.Media)) + ".channel" + ext
+			} else {
+				avName = strings.TrimSuffix(avName, filepath.Ext(avName)) + ext
 			}
 			dst := filepath.Join(dir, avName)
 			_ = os.Remove(dst)
@@ -191,7 +213,11 @@ func (s *Server) handleUpload(u *uploadDeps) http.HandlerFunc {
 		}
 		// Hasta 2 GB por subida (el grueso se streamea a disco temporal; solo 32 MB
 		// en memoria). El vídeo casero cabe de sobra.
-		if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if err := parseMultipartLimited(w, r, maxUploadRequest); err != nil {
+			if maxBytesError(err) {
+				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "la subida supera 2 GB"})
+				return
+			}
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "formulario inválido: " + err.Error()})
 			return
 		}
@@ -224,6 +250,14 @@ func (s *Server) handleUpload(u *uploadDeps) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tipo de fichero no soportado"})
 			return
 		}
+		// Validar las imágenes antes de crear el fichero principal. Así una portada
+		// activa no deja una subida huérfana que impida reintentar con el mismo nombre.
+		for _, field := range []string{"cover", "channel_avatar"} {
+			if err := validateOptionalRaster(r, field); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+		}
 
 		dst, err := u.dest(appDir, collection, filename)
 		if err != nil {
@@ -247,10 +281,13 @@ func (s *Server) handleUpload(u *uploadDeps) http.HandlerFunc {
 		cover := ""
 		if cf, ch, cerr := r.FormFile("cover"); cerr == nil {
 			base := strings.TrimSuffix(filename, filepath.Ext(filename))
-			coverName := base + ".cover" + strings.ToLower(filepath.Ext(sanitizeFilename(ch.Filename)))
-			if coverName == base+".cover" {
-				coverName = base + ".cover.jpg"
+			ext, verr := rasterUploadExtension(cf, ch)
+			if verr != nil {
+				cf.Close()
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "portada inválida: " + verr.Error()})
+				return
 			}
+			coverName := base + ".cover" + ext
 			if cdst, derr := u.dest(appDir, collection, coverName); derr == nil {
 				if saveMultipart(cf, cdst) == nil {
 					cover = coverName
@@ -265,10 +302,18 @@ func (s *Server) handleUpload(u *uploadDeps) http.HandlerFunc {
 		// vídeos del mismo canal lo comparten; canales distintos no se pisan. Sin
 		// autor, por-vídeo (<base>.channel.jpg). Distinto de la miniatura (cover).
 		channelAvatar := ""
-		if af, _, aerr := r.FormFile("channel_avatar"); aerr == nil {
+		if af, ah, aerr := r.FormFile("channel_avatar"); aerr == nil {
+			ext, verr := rasterUploadExtension(af, ah)
+			if verr != nil {
+				af.Close()
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "avatar inválido: " + verr.Error()})
+				return
+			}
 			avName := channelAvatarName(author)
 			if avName == "" {
-				avName = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".channel.jpg"
+				avName = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".channel" + ext
+			} else {
+				avName = strings.TrimSuffix(avName, filepath.Ext(avName)) + ext
 			}
 			if adst, derr := u.dest(appDir, collection, avName); derr == nil {
 				_ = os.Remove(adst) // el admin lo reemplaza a voluntad
@@ -364,6 +409,64 @@ func saveMultipart(src io.Reader, dst string) error {
 		return err
 	}
 	return nil
+}
+
+const maxRasterUpload = 20 << 20
+
+// rasterUploadExtension decide por los bytes, nunca por el nombre enviado en el
+// multipart. SVG/HTML y formatos desconocidos se rechazan; el fichero se guarda
+// con una extensión coherente para que el navegador no pueda interpretarlo como
+// contenido activo en el mismo origen de la aplicación.
+func rasterUploadExtension(src multipart.File, header *multipart.FileHeader) (string, error) {
+	if header != nil && header.Size > maxRasterUpload {
+		return "", fmt.Errorf("la imagen supera 20 MB")
+	}
+	buf := make([]byte, 512)
+	n, err := io.ReadFull(src, buf)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return "", fmt.Errorf("no se pudo leer la imagen")
+	}
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("no se pudo validar la imagen")
+	}
+	mimeType := http.DetectContentType(buf[:n])
+	switch mimeType {
+	case "image/jpeg":
+		return ".jpg", nil
+	case "image/png":
+		return ".png", nil
+	case "image/gif":
+		return ".gif", nil
+	case "image/webp":
+		return ".webp", nil
+	default:
+		return "", fmt.Errorf("solo se admiten JPEG, PNG, GIF o WebP")
+	}
+}
+
+func validateOptionalRaster(r *http.Request, field string) error {
+	f, header, err := r.FormFile(field)
+	if err == http.ErrMissingFile {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%s inválido", field)
+	}
+	defer f.Close()
+	if _, err := rasterUploadExtension(f, header); err != nil {
+		return fmt.Errorf("%s inválido: %w", field, err)
+	}
+	return nil
+}
+
+func maxBytesError(err error) bool {
+	var tooLarge *http.MaxBytesError
+	return errors.As(err, &tooLarge)
+}
+
+func parseMultipartLimited(w http.ResponseWriter, r *http.Request, max int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, max)
+	return r.ParseMultipartForm(32 << 20)
 }
 
 // sanitizeSegment limpia un nombre de carpeta (colección): sin separadores ni "..".

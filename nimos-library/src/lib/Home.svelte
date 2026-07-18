@@ -150,10 +150,9 @@
     {#if !activeView}
       <div class="brand">
         <div class="lockup">
-          <span class="hlogo"><Logo size={85} /></span>
-          <Wordmark height={114} />
+          <Logo size={104} />
+          <Wordmark height={72} />
         </div>
-        <p>{t('home.subtitle')}</p>
       </div>
     {/if}
     <div class="searchwrap">
@@ -261,15 +260,11 @@
 
 <style>
   .home{background:var(--ground);min-height:100%}
-  .top{display:flex;flex-direction:column;align-items:center;padding:70px 24px 10px;transition:padding .2s ease}
+  .top{display:flex;flex-direction:column;align-items:center;padding:54px 24px 10px;transition:padding .2s ease}
   .top.compact{padding:26px 24px 8px;position:sticky;top:0;background:linear-gradient(var(--ground) 78%,transparent);z-index:5}
-  .brand{text-align:center;margin-bottom:26px;display:flex;flex-direction:column;align-items:center}
-  .lockup{display:flex;align-items:center;gap:20px}
-  /* Sube el libro ~10px: el wordmark reserva hueco para el descendente de la "y",
-     asi que su centro de caja cae por debajo del centro optico de la "L". */
-  .hlogo{display:grid;place-items:center;transform:translateY(-10px)}
-  .brand p{color:var(--muted);font-size:15px;margin-top:14px}
-  @media (max-width:560px){.lockup{gap:14px}}
+  .brand{text-align:center;margin-bottom:28px;display:flex;flex-direction:column;align-items:center}
+  .lockup{display:flex;flex-direction:column;align-items:center;gap:13px}
+  @media (max-width:560px){.top{padding-top:40px}.lockup{gap:11px}}
   .bigsearch{display:flex;align-items:center;gap:10px;width:100%;max-width:600px;height:46px;padding:0 16px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);transition:border-color .12s}
   .bigsearch:focus-within{border-color:color-mix(in srgb,var(--accent) 55%,var(--border))}
   .bigsearch :global(.ic){color:var(--muted)}

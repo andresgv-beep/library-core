@@ -1,5 +1,5 @@
 <script>
-  import { auth, login, logout, changePassword } from './auth.svelte.js';
+  import { auth, login, logout, logoutAll, changePassword } from './auth.svelte.js';
 
   let { onClose, onChanged, reason = '' } = $props();
 
@@ -62,6 +62,13 @@
     onClose?.();
   }
 
+  async function doLogoutAll() {
+    busy = true;
+    await logoutAll();
+    onChanged?.();
+    onClose?.();
+  }
+
   const initials = (n) => (n || '?').slice(0, 2).toUpperCase();
 </script>
 
@@ -94,6 +101,7 @@
         </form>
       {:else}
         <button class="btn" onclick={() => { showChange = true; cpErr = ''; cpOk = false; }}>Cambiar contraseña</button>
+        <button class="btn" onclick={doLogoutAll} disabled={busy}>Cerrar todas las sesiones</button>
         <button class="btn primary" onclick={doLogout} disabled={busy}>{busy ? '…' : 'Cerrar sesión'}</button>
       {/if}
     {:else}

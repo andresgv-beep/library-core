@@ -179,7 +179,11 @@ func (c *adminCatalog) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := url.Parse(strings.TrimSpace(req.URL))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !strings.Contains(u.Host, "kiwix.org") {
+	host := ""
+	if err == nil {
+		host = strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	}
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !isKiwixHost(host) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "URL inválida (solo descargas de kiwix.org)"})
 		return
 	}
@@ -198,4 +202,9 @@ func (c *adminCatalog) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, job)
+}
+
+func isKiwixHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	return host == "kiwix.org" || strings.HasSuffix(host, ".kiwix.org")
 }

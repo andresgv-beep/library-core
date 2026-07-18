@@ -77,8 +77,16 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
   token    TEXT PRIMARY KEY,
   username TEXT NOT NULL,
-  created  INTEGER NOT NULL
+  created  INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS media_tokens (
+  token         TEXT PRIMARY KEY,
+  session_token TEXT NOT NULL,
+  username      TEXT NOT NULL,
+  expires       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_tokens_expiry ON media_tokens(expires);
 -- Acceso por colección (Panel · usuarios/18+). Sin fila = 'blocked' por defecto.
 CREATE TABLE IF NOT EXISTS collection_access (
   collection_id TEXT PRIMARY KEY,
@@ -125,6 +133,14 @@ func openStore(path string) (*Store, error) {
 	// allow_download en collection_access (permiso de descarga separado del de ver).
 	// Idempotente: si ya existe la columna, ensureColumn no hace nada.
 	if err := st.ensureColumn("collection_access", "allow_download", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := st.ensureColumn("sessions", "last_seen", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`UPDATE sessions SET last_seen = created WHERE last_seen = 0`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -559,6 +575,7 @@ func (s *Store) DeleteUserData(username string) error {
 		return err
 	}
 	for _, stmt := range []string{
+		`DELETE FROM media_tokens WHERE username = ?`,
 		`DELETE FROM sessions  WHERE username = ?`,
 		`DELETE FROM favorites WHERE user = ?`,
 		`DELETE FROM notes     WHERE user = ?`,

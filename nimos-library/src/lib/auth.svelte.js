@@ -2,7 +2,7 @@
 // El backend ya filtra librerías/contenido por sesión; aquí solo iniciamos y
 // cerramos sesión, y sabemos quién somos para pintar la cuenta.
 
-import { serverFetch, setSessionToken, serverUrl } from './connection.js';
+import { serverFetch, setMediaToken, setSessionToken, serverUrl } from './connection.js';
 import { syncLocalIdentity } from './localIdentity.js';
 
 export const auth = $state({ user: null, setupNeeded: false, loaded: false });
@@ -14,15 +14,39 @@ export const auth = $state({ user: null, setupNeeded: false, loaded: false });
 // admin marque descarga anónima).
 export const loginPrompt = $state({ open: false, reason: '' });
 
+let mediaRefreshTimer = null;
+
+async function refreshMediaToken() {
+  if (!auth.user) { setMediaToken(''); return; }
+  const r = await serverFetch('/api/auth/media-token', { method: 'POST' });
+  if (!r.ok) { setMediaToken(''); return; }
+  const data = await r.json();
+  setMediaToken(data.token || '');
+  if (!mediaRefreshTimer && typeof window !== 'undefined') {
+    mediaRefreshTimer = window.setInterval(() => { if (auth.user) refreshMediaToken().catch(() => setMediaToken('')); }, 10 * 60 * 1000);
+  }
+}
+
+async function rotateSession() {
+  const r = await serverFetch('/api/auth/refresh', { method: 'POST' });
+  if (!r.ok) return false;
+  const data = await r.json();
+  if (data.sessionToken) setSessionToken(data.sessionToken);
+  return true;
+}
+
 export async function refreshAuth() {
   try {
     const r = await serverFetch('/api/auth/me');
     const d = await r.json();
     auth.user = d.user || null;
     auth.setupNeeded = !!d.setupNeeded;
+    if (auth.user) await rotateSession();
+    await refreshMediaToken();
     if (syncLocalIdentity(auth.user)) setTimeout(() => window.location.reload(), 0);
   } catch (e) {
     auth.user = null;
+    setMediaToken('');
   }
   auth.loaded = true;
 }
@@ -44,6 +68,16 @@ export async function login(username, password) {
 export async function logout() {
   await serverFetch('/api/auth/logout', { method: 'POST' });
   setSessionToken('');
+  setMediaToken('');
+  const identityChanged = syncLocalIdentity(null);
+  await refreshAuth();
+  if (identityChanged) setTimeout(() => window.location.reload(), 0);
+}
+
+export async function logoutAll() {
+  await serverFetch('/api/auth/logout-all', { method: 'POST' });
+  setSessionToken('');
+  setMediaToken('');
   const identityChanged = syncLocalIdentity(null);
   await refreshAuth();
   if (identityChanged) setTimeout(() => window.location.reload(), 0);

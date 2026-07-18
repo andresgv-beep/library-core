@@ -138,6 +138,20 @@ func TestMediaTraversalBlocked(t *testing.T) {
 	}
 }
 
+func TestMediaSymlinkEscapeBlocked(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secreto"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "enlace")); err != nil {
+		t.Skipf("el sistema no permite crear symlinks para la prueba: %v", err)
+	}
+	if _, err := (&mediaDeps{root: root}).safeResolve("enlace/secret.txt"); err == nil {
+		t.Fatal("safeResolve siguió un symlink fuera del pool")
+	}
+}
+
 func readAll(t *testing.T, resp *http.Response) string {
 	t.Helper()
 	buf := make([]byte, 0, 64)

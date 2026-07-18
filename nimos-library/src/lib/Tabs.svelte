@@ -1,5 +1,6 @@
 <script>
   import Icon from './Icon.svelte';
+  import Logo from './Logo.svelte';
   import { t } from './i18n.svelte.js';
   import { profile, profileInitials, profileGradient } from './profile.svelte.js';
   import { shell, win } from './shell.svelte.js';
@@ -7,15 +8,8 @@
 </script>
 
 <header class="top" class:desktop={shell.desktop}>
-  <div class="brand">
-    <svg class="brandmark" viewBox="0 0 512 512" width="24" height="24" aria-hidden="true">
-      <circle cx="256" cy="256" r="206" fill="#343941" />
-      <g fill="#fff">
-        <path d="M150 178 C150 168 158 162 168 162 C198 162 223 171 244 191 C250 197 253 205 253 214 L253 349 C228 326 198 314 161 314 C154 314 150 309 150 302 Z" />
-        <path d="M362 178 C362 168 354 162 344 162 C314 162 289 171 268 191 C262 197 259 205 259 214 L259 349 C284 326 314 314 351 314 C358 314 362 309 362 302 Z" />
-      </g>
-    </svg>
-    <b>Library</b>
+  <div class="brand" title="Noumon" aria-label="Noumon">
+    <Logo size={28} />
   </div>
 
   <div class="tabs">
@@ -52,9 +46,7 @@
 
 <style>
   .top{display:flex;align-items:center;gap:6px;background:var(--panel-2);border-bottom:1px solid var(--border-soft);padding:0 12px 0 16px;height:100%}
-  .brand{display:flex;align-items:center;gap:9px;padding-right:12px;flex:none}
-  .brandmark{display:block;flex:none}
-  .brand b{font-size:14px;font-weight:640;letter-spacing:.1px}
+  .brand{display:grid;place-items:center;width:32px;padding-right:6px;flex:none}
   .tabs{display:flex;align-items:center;gap:4px;flex:1;min-width:0;height:100%;padding-top:0;overflow:hidden}
   .tabwrap{display:flex;align-items:center;max-width:210px;height:34px;border-radius:9px;color:var(--muted);font-size:13px;white-space:nowrap;border:1px solid transparent;transition:background .12s,color .12s,border-color .12s;overflow:hidden}
   .tabwrap:hover{background:var(--panel);color:var(--ink-dim)}

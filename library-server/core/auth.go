@@ -32,6 +32,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -49,7 +50,10 @@ const (
 	guestCookie   = "nimos_guest"
 	// sessionTTL: caducidad REAL, comprobada en servidor. El MaxAge de la cookie
 	// solo es una sugerencia al navegador; el token de la DB es el que manda.
-	sessionTTL = 30 * 24 * time.Hour
+	sessionTTL       = 30 * 24 * time.Hour
+	sessionIdleTTL   = 7 * 24 * time.Hour
+	sessionTouchStep = 5 * time.Minute
+	mediaTokenTTL    = 15 * time.Minute
 )
 
 type User struct {
@@ -264,15 +268,19 @@ func (s *Server) newSession(username string) (string, error) {
 		return "", err
 	}
 	token := hex.EncodeToString(b)
-	_, err := s.store.db.Exec(`INSERT INTO sessions (token, username, created) VALUES (?,?,?)`,
-		token, username, time.Now().Unix())
+	now := time.Now().Unix()
+	_, err := s.store.db.Exec(`INSERT INTO sessions (token, username, created, last_seen) VALUES (?,?,?,?)`,
+		token, username, now, now)
 	return token, err
 }
 
 // purgeSessions borra las sesiones caducadas. Se llama en login: barato y
 // suficiente (no necesita scheduler propio).
 func (s *Server) purgeSessions() {
-	s.store.db.Exec(`DELETE FROM sessions WHERE created < ?`, time.Now().Add(-sessionTTL).Unix())
+	now := time.Now()
+	s.store.db.Exec(`DELETE FROM sessions WHERE created < ? OR (CASE WHEN last_seen = 0 THEN created ELSE last_seen END) < ?`,
+		now.Add(-sessionTTL).Unix(), now.Add(-sessionIdleTTL).Unix())
+	s.store.db.Exec(`DELETE FROM media_tokens WHERE expires < ? OR session_token NOT IN (SELECT token FROM sessions)`, now.Unix())
 }
 
 // currentUser devuelve el usuario de la sesión (cookie) o nil si es anónimo.
@@ -282,26 +290,56 @@ func (s *Server) currentUser(r *http.Request) *User {
 	if u, ok := r.Context().Value(ctxUserKey).(*User); ok {
 		return u // ya resuelto por requireAdmin: no repetimos la consulta
 	}
-	token := requestSessionToken(r)
+	token := primarySessionToken(r)
+	mediaToken := ""
 	if token == "" {
+		mediaToken = mediaTokenFromRequest(r)
+	}
+	if token == "" && mediaToken == "" {
 		return nil
 	}
 	var u User
 	var adm int
-	err := s.store.db.QueryRow(`
-		SELECT u.id, u.username, u.age, u.is_admin
-		FROM sessions s JOIN users u ON u.username = s.username
-		WHERE s.token = ? AND s.created > ?`,
-		token, time.Now().Add(-sessionTTL).Unix()).
-		Scan(&u.ID, &u.Username, &u.Age, &adm)
+	var sessionToken string
+	var lastSeen int64
+	now := time.Now()
+	var err error
+	if token != "" {
+		sessionToken = token
+		err = s.store.db.QueryRow(`
+			SELECT u.id, u.username, u.age, u.is_admin, s.last_seen
+			FROM sessions s JOIN users u ON u.username = s.username
+			WHERE s.token = ? AND s.created > ? AND (CASE WHEN s.last_seen = 0 THEN s.created ELSE s.last_seen END) > ?`,
+			token, now.Add(-sessionTTL).Unix(), now.Add(-sessionIdleTTL).Unix()).
+			Scan(&u.ID, &u.Username, &u.Age, &adm, &lastSeen)
+	} else {
+		err = s.store.db.QueryRow(`
+			SELECT u.id, u.username, u.age, u.is_admin, s.token, s.last_seen
+			FROM media_tokens mt
+			JOIN sessions s ON s.token = mt.session_token
+			JOIN users u ON u.username = mt.username AND u.username = s.username
+			WHERE mt.token = ? AND mt.expires > ? AND s.created > ? AND (CASE WHEN s.last_seen = 0 THEN s.created ELSE s.last_seen END) > ?`,
+			mediaToken, now.Unix(), now.Add(-sessionTTL).Unix(), now.Add(-sessionIdleTTL).Unix()).
+			Scan(&u.ID, &u.Username, &u.Age, &adm, &sessionToken, &lastSeen)
+	}
 	if err != nil {
 		return nil
+	}
+	if lastSeen < now.Add(-sessionTouchStep).Unix() {
+		_, _ = s.store.db.Exec(`UPDATE sessions SET last_seen = ? WHERE token = ?`, now.Unix(), sessionToken)
 	}
 	u.IsAdmin = adm == 1
 	return &u
 }
 
 func requestSessionToken(r *http.Request) string {
+	if token := primarySessionToken(r); token != "" {
+		return token
+	}
+	return mediaTokenFromRequest(r)
+}
+
+func primarySessionToken(r *http.Request) string {
 	auth := strings.TrimSpace(r.Header.Get("Authorization"))
 	if len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
 		return strings.TrimSpace(auth[7:])
@@ -309,6 +347,10 @@ func requestSessionToken(r *http.Request) string {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		return c.Value
 	}
+	return ""
+}
+
+func mediaTokenFromRequest(r *http.Request) string {
 	// Fallback para elementos NATIVOS del navegador (video, embed/pdf, img) que
 	// no pueden mandar la cabecera Authorization y, cross-origin (cliente en otro
 	// puerto/host), tampoco siempre la cookie: el token viaja en la query (?st=).
@@ -341,7 +383,8 @@ func (s *Server) currentUsername(r *http.Request) string {
 
 // hasMachineToken: ¿viene del daemon de NimOS por el carril máquina?
 func (s *Server) hasMachineToken(r *http.Request) bool {
-	return s.token != "" && r.Header.Get("X-Nimos-Token") == s.token
+	provided := r.Header.Get("X-Nimos-Token")
+	return s.token != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) == 1
 }
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
@@ -391,7 +434,10 @@ func (s *Server) registerAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
 	mux.HandleFunc("/api/auth/logout", s.handleLogout)
+	mux.HandleFunc("/api/auth/logout-all", s.handleLogoutAll)
+	mux.HandleFunc("/api/auth/refresh", s.handleRefreshSession)
 	mux.HandleFunc("/api/auth/me", s.handleMe)
+	mux.HandleFunc("/api/auth/media-token", s.handleMediaToken)
 	mux.HandleFunc("/api/auth/password", s.handleChangePassword) // el usuario cambia la suya
 }
 
@@ -414,6 +460,11 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "esta cuenta no gestiona contraseña"})
 		return
 	}
+	ip := "password:" + clientIP(r)
+	if _, blocked := passwordLimiter.blocked(ip); blocked {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "demasiados intentos de contraseña; espera unos segundos"})
+		return
+	}
 	var req struct {
 		Current string `json:"current"`
 		New     string `json:"new"`
@@ -424,9 +475,11 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// Verificar la contraseña actual (mismo camino que el login, bcrypt).
 	if _, ok := s.userForCredentials(me.Username, req.Current); !ok {
+		passwordLimiter.fail(ip)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "la contraseña actual no es correcta"})
 		return
 	}
+	passwordLimiter.reset(ip)
 	if err := s.setPasswordByUsername(me.Username, req.New); err != nil {
 		writeInputError(w, err)
 		return
@@ -434,6 +487,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	// Cerrar las OTRAS sesiones (por si la contraseña se cambió por sospecha de
 	// filtración) y renovar la de esta petición para no quedar fuera.
 	s.store.db.Exec(`DELETE FROM sessions WHERE username = ?`, me.Username)
+	s.store.db.Exec(`DELETE FROM media_tokens WHERE username = ?`, me.Username)
 	token, err := s.newSession(me.Username)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -564,11 +618,105 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if token := requestSessionToken(r); token != "" {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "solo POST"})
+		return
+	}
+	if token := primarySessionToken(r); token != "" {
+		s.store.db.Exec(`DELETE FROM media_tokens WHERE session_token = ?`, token)
 		s.store.db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, MaxAge: -1})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleLogoutAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "solo POST"})
+		return
+	}
+	me := s.currentUser(r)
+	if me == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "necesitas iniciar sesión"})
+		return
+	}
+	s.store.db.Exec(`DELETE FROM media_tokens WHERE username = ?`, me.Username)
+	s.store.db.Exec(`DELETE FROM sessions WHERE username = ?`, me.Username)
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, MaxAge: -1})
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleRefreshSession rota el secreto sin ampliar su vida absoluta: conserva
+// created y solo sustituye el token. El cliente lo llama al arrancar, reduciendo
+// la ventana útil de un token copiado sin convertir la sesión en infinita.
+func (s *Server) handleRefreshSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "solo POST"})
+		return
+	}
+	oldToken := primarySessionToken(r)
+	if oldToken == "" || s.currentUser(r) == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "necesitas iniciar sesión"})
+		return
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo renovar la sesión"})
+		return
+	}
+	newToken := hex.EncodeToString(b)
+	tx, err := s.store.db.Begin()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo renovar la sesión"})
+		return
+	}
+	if _, err = tx.Exec(`DELETE FROM media_tokens WHERE session_token = ?`, oldToken); err == nil {
+		var result sql.Result
+		result, err = tx.Exec(`UPDATE sessions SET token = ?, last_seen = ? WHERE token = ?`, newToken, time.Now().Unix(), oldToken)
+		if err == nil {
+			if changed, _ := result.RowsAffected(); changed != 1 {
+				err = fmt.Errorf("sesión no encontrada")
+			}
+		}
+	}
+	if err != nil {
+		tx.Rollback()
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "la sesión ya no es válida"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo renovar la sesión"})
+		return
+	}
+	s.setSessionCookie(w, r, newToken)
+	writeJSON(w, http.StatusOK, map[string]string{"sessionToken": newToken})
+}
+
+func (s *Server) handleMediaToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "solo POST"})
+		return
+	}
+	sessionToken := primarySessionToken(r)
+	me := s.currentUser(r)
+	if sessionToken == "" || me == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "necesitas iniciar sesión"})
+		return
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo crear el token multimedia"})
+		return
+	}
+	token := hex.EncodeToString(b)
+	expires := time.Now().Add(mediaTokenTTL).Unix()
+	s.purgeSessions()
+	if _, err := s.store.db.Exec(`INSERT INTO media_tokens (token, session_token, username, expires) VALUES (?,?,?,?)`,
+		token, sessionToken, me.Username, expires); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo crear el token multimedia"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expires": expires})
 }
 
 // GET /api/auth/me — quién soy + si falta el setup inicial (0 usuarios).
@@ -666,6 +814,7 @@ func (s *Server) handleAdminUserOp(w http.ResponseWriter, r *http.Request) {
 		// tiene sesión; y si alguien la tenía, un reset debe invalidarla.
 		var uname string
 		if e := s.store.db.QueryRow(`SELECT username FROM users WHERE id = ?`, id).Scan(&uname); e == nil {
+			s.store.db.Exec(`DELETE FROM media_tokens WHERE username = ?`, uname)
 			s.store.db.Exec(`DELETE FROM sessions WHERE username = ?`, uname)
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -763,6 +912,7 @@ type ipLimiter struct {
 }
 
 var loginLimiter = &ipLimiter{m: make(map[string]*loginAttempt)}
+var passwordLimiter = &ipLimiter{m: make(map[string]*loginAttempt)}
 
 // blocked indica si la IP debe esperar, y cuánto.
 func (l *ipLimiter) blocked(ip string) (time.Duration, bool) {

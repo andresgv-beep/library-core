@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { authMe, authLogout, getHealth, getServiceStatus, restartLibraryServer } from './lib/api.js'
+  import { authMe, authLogout, authLogoutAll, authRefresh, getHealth, getServiceStatus, restartLibraryServer } from './lib/api.js'
   import Login from './lib/Login.svelte'
   import Storage from './lib/Storage.svelte'
   import Collections from './lib/Collections.svelte'
@@ -33,9 +33,11 @@
 
   async function refreshAuth() {
     me = await authMe()
+    if (me.user) await authRefresh()
     if (me.user?.isAdmin) loadHealth()
   }
   async function logout() { await authLogout(); await refreshAuth() }
+  async function logoutAll() { await authLogoutAll(); await refreshAuth() }
 
   async function restartServer() {
     if (restarting || !confirm('¿Reiniciar Library Server ahora? Las conexiones se recuperarán automáticamente.')) return
@@ -101,6 +103,7 @@
       {#if service.supervised}
         <button class="btn restart" disabled={restarting} onclick={restartServer}>{restarting ? 'Reiniciando…' : 'Reiniciar servidor'}</button>
       {/if}
+      <button class="btn logout" onclick={logoutAll}>Cerrar todas</button>
       <button class="btn logout" onclick={logout}>Cerrar sesión</button>
     </nav>
   {/if}

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -103,7 +104,7 @@ func NewManager(db *sql.DB, maxParallel int, onEvent ProgressFunc) (*Manager, er
 
 	m := &Manager{
 		db:          db,
-		client:      &http.Client{Timeout: 0}, // sin timeout global; controlamos con deadline por stall
+		client:      newSafeHTTPClient(), // sin timeout global; el stall se controla durante la copia
 		maxParallel: maxParallel,
 		active:      make(map[string]context.CancelFunc),
 		onEvent:     onEvent,
@@ -113,6 +114,83 @@ func NewManager(db *sql.DB, maxParallel int, onEvent ProgressFunc) (*Manager, er
 		return nil, fmt.Errorf("download: migrate schema: %w", err)
 	}
 	return m, nil
+}
+
+// newSafeHTTPClient impide que una URL pública redirija la descarga hacia la
+// LAN, loopback o servicios link-local. CheckRedirect valida cada salto y el
+// DialContext vuelve a validar la IP realmente usada, cerrando también el hueco
+// de DNS rebinding entre la comprobación y la conexión.
+func newSafeHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = safeDialContext
+	return &http.Client{
+		Timeout:   0,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("demasiadas redirecciones")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirección a esquema no permitido")
+			}
+			if !downloadHostIsPublic(req.Context(), req.URL.Hostname()) {
+				return fmt.Errorf("redirección a red interna bloqueada")
+			}
+			return nil
+		},
+	}
+}
+
+func safeDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("destino de descarga inválido: %w", err)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return nil, fmt.Errorf("no se pudo verificar el destino de descarga")
+	}
+	for _, candidate := range ips {
+		if !downloadIPIsPublic(candidate.IP) {
+			return nil, fmt.Errorf("destino de red interna bloqueado")
+		}
+	}
+
+	dialer := &net.Dialer{}
+	var lastErr error
+	for _, candidate := range ips {
+		conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	return nil, lastErr
+}
+
+func downloadHostIsPublic(ctx context.Context, host string) bool {
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return downloadIPIsPublic(ip)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return false
+	}
+	for _, candidate := range ips {
+		if !downloadIPIsPublic(candidate.IP) {
+			return false
+		}
+	}
+	return true
+}
+
+func downloadIPIsPublic(ip net.IP) bool {
+	return ip != nil && !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast())
 }
 
 func (m *Manager) migrate() error {

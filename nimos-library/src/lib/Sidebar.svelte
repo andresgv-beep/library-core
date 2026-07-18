@@ -35,7 +35,18 @@
     {/each}
   </nav>
 
-  <div class="sec-label">{t('side.collections')} <button class="add" title={t('side.addCollection')}><Icon name="plus" size={15} /></button></div>
+  <div class="sec-label">
+    <span class="sec-title">
+      <svg class="library-mark" viewBox="0 0 100 100" width="16" height="16" aria-hidden="true">
+        <g fill="currentColor" transform="translate(50 50) scale(.43) translate(-256 -255.5)">
+          <path d="M150 178 C150 168 158 162 168 162 C198 162 223 171 244 191 C250 197 253 205 253 214 L253 349 C228 326 198 314 161 314 C154 314 150 309 150 302 Z" />
+          <path d="M362 178 C362 168 354 162 344 162 C314 162 289 171 268 191 C262 197 259 205 259 214 L259 349 C284 326 314 314 351 314 C358 314 362 309 362 302 Z" />
+        </g>
+      </svg>
+      {t('side.collections')}
+    </span>
+    <button class="add" title={t('side.addCollection')}><Icon name="plus" size={15} /></button>
+  </div>
 
   <div class="libs scroll thin">
     <div class="lib" class:active={activeView === 'cabinet'}>
@@ -99,6 +110,8 @@
   .navlink.active{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--ink)}
   .navlink.active :global(.ic){color:var(--accent-2)}
   .sec-label{padding:16px 20px 8px;font-size:11px;font-weight:650;letter-spacing:.7px;color:var(--faint);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
+  .sec-title{display:flex;align-items:center;gap:7px}
+  .library-mark{display:block;flex:none;color:var(--muted)}
   .add{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;color:var(--muted)}
   .add:hover{background:var(--raise);color:var(--ink)}
   .libs{flex:1;overflow-y:auto;padding:0 10px;display:flex;flex-direction:column;gap:1px}

@@ -127,6 +127,9 @@ func (s *Server) gateMediaFile(m *mediaDeps) http.HandlerFunc {
 		// al navegar fuera. /content ya lo pone en setContentIsolation; aquí es
 		// para /media.
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		m.handleMediaFile(w, r)
 	}
 }
@@ -324,15 +327,37 @@ func (m *mediaDeps) handleMediaFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, filepath.Base(abs), info.ModTime(), f)
 }
 
-// safeResolve ancla `rel` a DOWNLOAD_ROOT y garantiza que no escapa (../..).
+// safeResolve ancla `rel` a DOWNLOAD_ROOT y garantiza que no escapa ni por
+// segmentos .. ni siguiendo symlinks/junctions creados dentro del pool.
 func (m *mediaDeps) safeResolve(rel string) (string, error) {
 	if m.root == "" {
 		return "", fmt.Errorf("DOWNLOAD_ROOT no configurado")
 	}
-	full := filepath.Clean(filepath.Join(m.root, filepath.FromSlash(rel)))
-	root := strings.TrimRight(m.root, string(filepath.Separator))
-	if full != root && !strings.HasPrefix(full, root+string(filepath.Separator)) {
+	rootAbs, err := filepath.Abs(m.root)
+	if err != nil {
+		return "", err
+	}
+	full := filepath.Clean(filepath.Join(rootAbs, filepath.FromSlash(rel)))
+	relToRoot, err := filepath.Rel(rootAbs, full)
+	if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) || filepath.IsAbs(relToRoot) {
 		return "", fmt.Errorf("ruta fuera de la carpeta permitida")
+	}
+	// Lstat no sigue enlaces: se rechaza cualquier componente enlazado antes de
+	// abrir el fichero. Es deliberadamente conservador; el pool debe contener
+	// ficheros reales, no accesos a otras ubicaciones del sistema.
+	current := rootAbs
+	for _, part := range strings.Split(relToRoot, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, statErr := os.Lstat(current)
+		if statErr != nil {
+			return "", statErr
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("enlaces simbólicos no permitidos en medios")
+		}
 	}
 	return full, nil
 }

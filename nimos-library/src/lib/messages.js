@@ -43,7 +43,7 @@ export const messages = {
     'nav.index': 'Índice',
 
     // sidebar
-    'side.library': 'Biblioteca',
+    'side.library': 'Noumon',
     'side.collections': 'Bibliotecas',
     'side.addCollection': 'Añadir colección',
     'side.pinSite': 'Añadir a Tus sitios',
@@ -210,8 +210,7 @@ export const messages = {
     'watch.chapters': 'Capítulos',
 
     // inicio / buscador
-    'home.title': 'Library',
-    'home.subtitle': 'Busca en todas tus colecciones a la vez. Tu conocimiento, offline.',
+    'home.title': 'Noumon',
     'home.searchPlaceholder': 'Busca en todas tus colecciones…',
     'home.clear': 'Limpiar',
     'home.all': 'Todo',
@@ -400,7 +399,7 @@ export const messages = {
     'nav.index': 'Outline',
 
     // sidebar
-    'side.library': 'Library',
+    'side.library': 'Noumon',
     'side.collections': 'Collections',
     'side.addCollection': 'Add collection',
     'side.pinSite': 'Add to Your sites',
@@ -567,8 +566,7 @@ export const messages = {
     'watch.chapters': 'Chapters',
 
     // home / search
-    'home.title': 'Library',
-    'home.subtitle': 'Search all your collections at once. Your knowledge, offline.',
+    'home.title': 'Noumon',
     'home.searchPlaceholder': 'Search all your collections…',
     'home.clear': 'Clear',
     'home.all': 'All',

@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -136,7 +137,10 @@ func main() {
 	kiwixURL := env("KIWIX_URL", "http://127.0.0.1:8080")
 	port := env("PORT", "8090")
 	bind := env("BIND", "127.0.0.1") // dev: solo loopback. Container/NAS: 0.0.0.0 (LAN, §6).
-	token := os.Getenv("NIMOS_TOKEN")
+	token := strings.TrimSpace(os.Getenv("NIMOS_TOKEN"))
+	if err := validateMachineToken(token); err != nil {
+		log.Fatal(err)
+	}
 
 	ku, err := url.Parse(kiwixURL)
 	if err != nil {
@@ -389,8 +393,8 @@ func main() {
 
 	log.Printf("gestión ZIM: NATIVA (sin kiwix-manage) · library=%s", libraryXML)
 
-	mux.HandleFunc("/content/", s.handleContent)                 // passthrough directo (streaming, §7)
-	mux.HandleFunc("/catalog/v2/illustration/", s.handleContent) // logo/ilustración de cada ZIM (icono real)
+	mux.HandleFunc("/content/", s.handleContent) // passthrough directo (streaming, §7)
+	mux.HandleFunc("/catalog/v2/illustration/", s.handleIllustration)
 	// Plugin Maps (offline): página + assets estáticos y los tiles PMTiles (con range).
 	mapsFS := http.StripPrefix("/maps/", http.FileServer(http.Dir(siblingDir("maps-www"))))
 	mux.HandleFunc("/maps/", func(w http.ResponseWriter, r *http.Request) {
@@ -401,12 +405,13 @@ func main() {
 		}
 		mapsFS.ServeHTTP(w, r)
 	})
-	mux.Handle("/mapdata/", http.StripPrefix("/mapdata/", http.FileServer(http.Dir(mapsDir))))
+	mux.Handle("/mapdata/", mapDataHandler(mapsDir))
 	// Panel de Control: segunda superficie (app aparte), servida como estáticos.
 	// no-cache en el HTML para que los rebuilds se reflejen sin hard-refresh; los
 	// assets van con hash en el nombre, así que su caché sí es segura.
 	panelFS := http.StripPrefix("/panel/", http.FileServer(http.Dir(siblingDir("www-panel"))))
 	mux.HandleFunc("/panel/", func(w http.ResponseWriter, r *http.Request) {
+		setTopLevelIsolation(w)
 		if !strings.Contains(r.URL.Path, "/assets/") {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		}
@@ -421,6 +426,7 @@ func main() {
 	clientFS := http.FileServer(http.Dir(clientDir))
 	clientIndex := filepath.Join(clientDir, "index.html")
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		setTopLevelIsolation(w)
 		// ¿Existe el fichero pedido? http.Dir.Open bloquea el path traversal.
 		if r.URL.Path != "/" {
 			if f, err := http.Dir(clientDir).Open(r.URL.Path); err == nil {
@@ -461,6 +467,15 @@ func main() {
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		// Defensa CSRF para cualquier mutación iniciada por navegador. Clientes de
+		// sistema/CLI sin Origin siguen funcionando; los orígenes remotos permitidos
+		// se declaran en CLIENT_ORIGINS.
+		if requestIsMutation(r) && !requestOriginAllowed(r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "origen de la petición no permitido"})
+			return
+		}
+
 		// Identidad estable y aislada para favoritos/notas/historial del invitado.
 		// No concede permisos: currentUser sigue siendo nil hasta iniciar sesión.
 		r = s.withGuestIdentity(w, r)
@@ -498,6 +513,73 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 		log.Printf("%s %s (%s)", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
+	})
+}
+
+// setTopLevelIsolation evita que la SPA o el Panel autenticado se ejecuten
+// dentro de un iframe controlado por otra web. No se aplica a /content ni /maps:
+// esas superficies sí se incrustan de forma intencionada dentro del lector.
+func setTopLevelIsolation(w http.ResponseWriter) {
+	w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+	w.Header().Set("X-Frame-Options", "DENY")
+}
+
+func validateMachineToken(token string) error {
+	if token != "" && len(token) < 32 {
+		return fmt.Errorf("NIMOS_TOKEN debe tener al menos 32 caracteres o quedar vacío")
+	}
+	return nil
+}
+
+func requestIsMutation(r *http.Request) bool {
+	return r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions
+}
+
+func requestOriginAllowed(r *http.Request) bool {
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true // CLI, daemon y clientes antiguos sin cabecera de navegador
+	}
+	if clientOriginAllowed(origin) {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return strings.EqualFold(u.Scheme, scheme) && strings.EqualFold(u.Host, r.Host)
+}
+
+// mapDataHandler publica exclusivamente los archivos de teselas que consume
+// Maps. Evita el listado de la carpeta y que geo.db u otros ficheros internos
+// puedan descargarse por conocer su nombre.
+func mapDataHandler(mapsDir string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "solo lectura"})
+			return
+		}
+		name := strings.TrimPrefix(r.URL.Path, "/mapdata/")
+		if name == "" || strings.ContainsAny(name, `/\`) || filepath.Base(name) != name ||
+			!strings.HasSuffix(strings.ToLower(name), ".pmtiles") {
+			http.NotFound(w, r)
+			return
+		}
+		full := filepath.Join(mapsDir, name)
+		st, err := os.Stat(full)
+		if err != nil || !st.Mode().IsRegular() {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		http.ServeFile(w, r, full)
 	})
 }
 
@@ -583,6 +665,33 @@ func (s *Server) handleContent(w http.ResponseWriter, r *http.Request) {
 		s.serveZimNative(w, r)
 		return
 	}
+	s.proxy.ServeHTTP(w, r)
+}
+
+// handleIllustration aplica el mismo gate e aislamiento que /content. En modo
+// nativo sirve el icono directamente desde M/Illustration_48x48@1, evitando la
+// antigua caída al proxy Kiwix que no participa en ese modo.
+func (s *Server) handleIllustration(w http.ResponseWriter, r *http.Request) {
+	rawID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/catalog/v2/illustration/"), "/")
+	id, err := url.PathUnescape(rawID)
+	if err != nil || id == "" || strings.ContainsAny(id, `/\`) {
+		http.NotFound(w, r)
+		return
+	}
+	if !s.canSeeZim(s.currentUser(r), id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "sin acceso a esta colección"})
+		return
+	}
+	if s.zimNative != nil {
+		clone := r.Clone(r.Context())
+		u := *r.URL
+		u.Path = "/content/" + id + "/M/Illustration_48x48@1"
+		u.RawPath = ""
+		clone.URL = &u
+		s.handleContent(w, clone)
+		return
+	}
+	setContentIsolation(w)
 	s.proxy.ServeHTTP(w, r)
 }
 

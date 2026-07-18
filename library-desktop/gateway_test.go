@@ -25,8 +25,10 @@ func TestNormalizeRemoteTarget(t *testing.T) {
 func TestGatewayRewritesHostAndOnlyInjectsClient(t *testing.T) {
 	t.Parallel()
 	var receivedHost string
+	var receivedOrigin string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedHost = r.Host
+		receivedOrigin = r.Header.Get("Origin")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = io.WriteString(w, "<!doctype html><html><head></head><body>ok</body></html>")
 	}))
@@ -46,6 +48,16 @@ func TestGatewayRewritesHostAndOnlyInjectsClient(t *testing.T) {
 	}
 	if receivedHost != target.Host {
 		t.Fatalf("Host recibido = %q; esperado %q", receivedHost, target.Host)
+	}
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/test", strings.NewReader("{}"))
+	req.Header.Set("Origin", "http://wails.localhost")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if receivedOrigin != target.Scheme+"://"+target.Host {
+		t.Fatalf("Origin reenviado = %q; esperado el destino del gateway", receivedOrigin)
 	}
 
 	content := mustBody(t, server.URL+"/content/wiki/A/Portada")

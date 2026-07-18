@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -419,5 +420,148 @@ func TestClientIPHonorsForwardedHeaderForTrustedProxy(t *testing.T) {
 	r.Header.Set("X-Forwarded-For", "203.0.113.99, 192.0.2.20")
 	if got := clientIP(r); got != "203.0.113.99" {
 		t.Fatalf("clientIP = %q; debe tomar el primer salto con TRUST_PROXY=1", got)
+	}
+}
+
+func TestSessionExpiresAfterInactivity(t *testing.T) {
+	s := testAuthServer(t, "")
+	if _, err := s.createUser("idle", "clave-segura!", 30, false); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.newSession("idle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.store.db.Exec(`UPDATE sessions SET last_seen = ? WHERE token = ?`, time.Now().Add(-sessionIdleTTL-time.Hour).Unix(), token)
+	r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	if user := s.currentUser(r); user != nil {
+		t.Fatalf("una sesión inactiva siguió autenticando a %q", user.Username)
+	}
+}
+
+func TestEphemeralMediaTokenReplacesSessionTokenInURL(t *testing.T) {
+	s := testAuthServer(t, "")
+	if _, err := s.createUser("media", "clave-segura!", 30, false); err != nil {
+		t.Fatal(err)
+	}
+	session, err := s.newSession("media")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := httptest.NewRequest(http.MethodPost, "/api/auth/media-token", nil)
+	issue.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+	w := httptest.NewRecorder()
+	s.handleMediaToken(w, issue)
+	if w.Code != http.StatusOK {
+		t.Fatalf("emitir token multimedia: %d %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil || payload.Token == "" {
+		t.Fatalf("respuesta de token inválida: %v %q", err, payload.Token)
+	}
+
+	fullSessionURL := httptest.NewRequest(http.MethodGet, "/media/Cabinet/X/a.jpg?st="+session, nil)
+	if user := s.currentUser(fullSessionURL); user != nil {
+		t.Fatal("la sesión completa todavía funciona en ?st=")
+	}
+	mediaURL := httptest.NewRequest(http.MethodGet, "/media/Cabinet/X/a.jpg?st="+payload.Token, nil)
+	if user := s.currentUser(mediaURL); user == nil || user.Username != "media" {
+		t.Fatal("el token multimedia efímero no autentica la lectura")
+	}
+	_, _ = s.store.db.Exec(`UPDATE media_tokens SET expires = ? WHERE token = ?`, time.Now().Add(-time.Minute).Unix(), payload.Token)
+	if user := s.currentUser(mediaURL); user != nil {
+		t.Fatal("un token multimedia caducado siguió funcionando")
+	}
+}
+
+func TestLogoutAllRevokesEverySessionAndMediaToken(t *testing.T) {
+	s := testAuthServer(t, "")
+	if _, err := s.createUser("todas", "clave-segura!", 30, false); err != nil {
+		t.Fatal(err)
+	}
+	one, _ := s.newSession("todas")
+	_, _ = s.newSession("todas")
+	_, _ = s.store.db.Exec(`INSERT INTO media_tokens (token, session_token, username, expires) VALUES (?,?,?,?)`,
+		"media-test", one, "todas", time.Now().Add(time.Hour).Unix())
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/logout-all", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: one})
+	w := httptest.NewRecorder()
+	s.handleLogoutAll(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("logout-all: %d %s", w.Code, w.Body.String())
+	}
+	var sessions, media int
+	_ = s.store.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE username = 'todas'`).Scan(&sessions)
+	_ = s.store.db.QueryRow(`SELECT COUNT(*) FROM media_tokens WHERE username = 'todas'`).Scan(&media)
+	if sessions != 0 || media != 0 {
+		t.Fatalf("quedaron sesiones=%d tokens_media=%d", sessions, media)
+	}
+}
+
+func TestLogoutRequiresPost(t *testing.T) {
+	s := testAuthServer(t, "")
+	w := httptest.NewRecorder()
+	s.handleLogout(w, httptest.NewRequest(http.MethodGet, "/api/auth/logout", nil))
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("logout por GET devolvió %d", w.Code)
+	}
+}
+
+func TestPasswordChangeHasOwnRateLimit(t *testing.T) {
+	s := testAuthServer(t, "")
+	if _, err := s.createUser("limitada", "clave-segura!", 30, false); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.newSession("limitada")
+	old := passwordLimiter
+	passwordLimiter = &ipLimiter{m: make(map[string]*loginAttempt)}
+	t.Cleanup(func() { passwordLimiter = old })
+	ip := "password:192.0.2.1"
+	for i := 0; i <= loginFreeTries; i++ {
+		passwordLimiter.fail(ip)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/password", strings.NewReader(`{"current":"x","new":"nueva-clave!"}`))
+	r.RemoteAddr = "192.0.2.1:1234"
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	w := httptest.NewRecorder()
+	s.handleChangePassword(w, r)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("cambio de contraseña bloqueado devolvió %d", w.Code)
+	}
+}
+
+func TestSessionRefreshRotatesSecretWithoutExtendingAbsoluteTTL(t *testing.T) {
+	s := testAuthServer(t, "")
+	if _, err := s.createUser("rotada", "clave-segura!", 30, false); err != nil {
+		t.Fatal(err)
+	}
+	oldToken, _ := s.newSession("rotada")
+	var createdBefore int64
+	_ = s.store.db.QueryRow(`SELECT created FROM sessions WHERE token = ?`, oldToken).Scan(&createdBefore)
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: oldToken})
+	w := httptest.NewRecorder()
+	s.handleRefreshSession(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh: %d %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil || payload.SessionToken == "" || payload.SessionToken == oldToken {
+		t.Fatalf("no rotó el secreto: %v %+v", err, payload)
+	}
+	oldReq := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	oldReq.AddCookie(&http.Cookie{Name: sessionCookie, Value: oldToken})
+	if s.currentUser(oldReq) != nil {
+		t.Fatal("el token anterior siguió autenticando")
+	}
+	var createdAfter int64
+	_ = s.store.db.QueryRow(`SELECT created FROM sessions WHERE token = ?`, payload.SessionToken).Scan(&createdAfter)
+	if createdAfter != createdBefore {
+		t.Fatalf("la rotación amplió el TTL absoluto: antes=%d después=%d", createdBefore, createdAfter)
 	}
 }
