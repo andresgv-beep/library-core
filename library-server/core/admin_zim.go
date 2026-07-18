@@ -25,6 +25,7 @@ import (
 type adminZim struct {
 	libraryXML string // ruta a library.xml
 	zimDir     string // carpeta de ZIMs del pool
+	store      *Store
 
 	// onLibraryChange: se invoca tras una alta/baja exitosa en library.xml. El
 	// motor nativo lo usa para invalidar su registro de archives abiertos (§23).
@@ -69,13 +70,16 @@ func (a *adminZim) readLibrary() ([]xmlBook, error) {
 // ── Tipos de respuesta ─────────────────────────────────────────────────────
 
 type registeredZim struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Name     string `json:"name,omitempty"`
-	Language string `json:"language,omitempty"`
-	File     string `json:"file"`
-	Bytes    int64  `json:"bytes"`
-	Present  bool   `json:"present"` // el fichero existe en disco
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Name        string `json:"name,omitempty"`
+	Language    string `json:"language,omitempty"`
+	File        string `json:"file"`
+	Bytes       int64  `json:"bytes"`
+	Present     bool   `json:"present"` // el fichero existe en disco
+	Interactive bool   `json:"interactive"`
+	Official    bool   `json:"official"`
+	TrustStale  bool   `json:"trustStale,omitempty"`
 }
 
 type unregisteredZim struct {
@@ -115,9 +119,11 @@ func (a *adminZim) handleList(w http.ResponseWriter, r *http.Request) {
 		file := filepath.Base(b.Path)
 		claimed[file] = true
 		sz, present := sizes[file]
+		trust := a.trustState(zimTrustKey(file))
 		registered = append(registered, registeredZim{
 			ID: b.ID, Title: b.Title, Name: b.Name, Language: b.Language,
-			File: file, Bytes: sz, Present: present,
+			File: file, Bytes: sz, Present: present, Interactive: trust.Interactive,
+			Official: trust.Official, TrustStale: trust.Stale,
 		})
 	}
 
@@ -153,6 +159,10 @@ func (a *adminZim) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "registrar: " + err.Error()})
 		return
 	}
+	if err := a.writeTrust(zimTrustKey(file), file, "manual", false, true); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "guardar confianza: " + err.Error()})
+		return
+	}
 	a.libraryChanged() // que el motor nativo relea library.xml a la próxima petición
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": file, "id": id})
 }
@@ -172,6 +182,13 @@ func (a *adminZim) handleUnregister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "falta id"})
 		return
 	}
+	// El trust se llavea por id público (nombre sin ext), no por el id/UUID del
+	// Panel: resolvemos el fichero ANTES de quitar el libro de library.xml para
+	// poder borrar la fila correcta y no dejarla huérfana.
+	trustKey := id
+	if file, ok := a.bookFile(id); ok {
+		trustKey = zimTrustKey(file)
+	}
 	if err := a.removeBook(id); err != nil {
 		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "no está en la biblioteca") {
@@ -179,6 +196,9 @@ func (a *adminZim) handleUnregister(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
+	}
+	if a.store != nil {
+		_, _ = a.store.db.Exec(`DELETE FROM zim_content_trust WHERE collection_id = ?`, trustKey)
 	}
 	a.libraryChanged() // cerrar el archive nativo desregistrado (§23) y dejar de servirlo
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "note": "fichero conservado en el pool"})
@@ -211,6 +231,29 @@ func (a *adminZim) readFileArg(w http.ResponseWriter, r *http.Request) (string, 
 // registerDownloaded registra un .zim recién descargado al pool (auto-registro
 // del catálogo). Idempotente: addBook no duplica si ya está en library.xml.
 func (a *adminZim) registerDownloaded(destPath string) error {
+	return a.registerDownloadedMode(destPath)
+}
+
+func (a *adminZim) reconcileDownloaded(destPath string) error {
+	file := filepath.Base(destPath)
+	if !strings.EqualFold(filepath.Ext(file), ".zim") {
+		return nil
+	}
+	books, err := a.readLibrary()
+	if err != nil {
+		return err
+	}
+	for _, b := range books {
+		if strings.EqualFold(filepath.Base(b.Path), file) {
+			return a.writeTrust(zimTrustKey(file), file, "official", true, false)
+		}
+	}
+	// El administrador pudo quitarla del registro conservando el fichero y el
+	// historial de descarga. La reconciliacion no deshace esa decision.
+	return nil
+}
+
+func (a *adminZim) registerDownloadedMode(destPath string) error {
 	file := filepath.Base(destPath)
 	if !strings.EqualFold(filepath.Ext(file), ".zim") {
 		return fmt.Errorf("no es un .zim: %s", file)
@@ -221,6 +264,9 @@ func (a *adminZim) registerDownloaded(destPath string) error {
 	if _, err := a.addBook(file); err != nil {
 		return err
 	}
+	if err := a.writeTrust(zimTrustKey(file), file, "official", true, true); err != nil {
+		return fmt.Errorf("guardar confianza oficial: %w", err)
+	}
 	a.libraryChanged() // auto-registro del catálogo: que el motor nativo lo recoja
 	return nil
 }
@@ -229,4 +275,5 @@ func (a *adminZim) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/zim", a.handleList)
 	mux.HandleFunc("/api/admin/zim/register", a.handleRegister)
 	mux.HandleFunc("/api/admin/zim/unregister", a.handleUnregister)
+	mux.HandleFunc("/api/admin/zim/interactive", a.handleInteractive)
 }

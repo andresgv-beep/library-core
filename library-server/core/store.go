@@ -95,6 +95,14 @@ CREATE TABLE IF NOT EXISTS collection_access (
   allow_download INTEGER NOT NULL DEFAULT 0,       -- 0 = descargar exige cuenta; 1 = descarga anónima permitida
   updated       INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS zim_content_trust (
+  collection_id TEXT PRIMARY KEY,
+  file_name     TEXT NOT NULL,
+  file_stamp    TEXT NOT NULL,
+  source        TEXT NOT NULL,
+  enabled       INTEGER NOT NULL DEFAULT 0,
+  updated       INTEGER NOT NULL
+);
 `
 
 // Los índices sobre item_id NO van en el schema de arriba: en un upgrade in-place
@@ -144,7 +152,49 @@ func openStore(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := st.migrateTrustKeys(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return st, nil
+}
+
+// migrateTrustKeys re-llavea zim_content_trust del id antiguo (UUID del
+// library.xml) al id PÚBLICO (nombre de fichero sin extensión), que es el que usa
+// /content y por tanto interactiveAllowed. Sin esto, el trust que escribía el
+// Panel nunca casaba con la consulta del handler → el desbloqueo de contenido
+// interactivo (p. ej. TED) se ignoraba. Idempotente: solo toca filas cuyo
+// collection_id no sea ya el público. Se apoya solo en file_name (que ya está en
+// la fila), así que no necesita leer library.xml.
+func (s *Store) migrateTrustKeys() error {
+	rows, err := s.db.Query(`SELECT collection_id, file_name FROM zim_content_trust`)
+	if err != nil {
+		return err
+	}
+	type rekey struct{ old, neu string }
+	var todo []rekey
+	for rows.Next() {
+		var id, file string
+		if err := rows.Scan(&id, &file); err != nil {
+			rows.Close()
+			return err
+		}
+		pub := strings.TrimSuffix(file, filepath.Ext(file))
+		if pub != "" && pub != id {
+			todo = append(todo, rekey{id, pub})
+		}
+	}
+	rows.Close()
+	for _, t := range todo {
+		// Si ya existe una fila correcta bajo el id público, la vieja sobra y el
+		// UPDATE chocaría con la PK: en ese caso se borra la vieja.
+		if _, err := s.db.Exec(`UPDATE zim_content_trust SET collection_id=? WHERE collection_id=?`, t.neu, t.old); err != nil {
+			if _, derr := s.db.Exec(`DELETE FROM zim_content_trust WHERE collection_id=?`, t.old); derr != nil {
+				return derr
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Store) hasColumn(table, column string) (bool, error) {

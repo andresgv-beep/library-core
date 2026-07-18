@@ -468,21 +468,25 @@ func zimMediaCount(counter string) int {
 	return total
 }
 
-// setContentIsolation aplica los headers §19 a TODO /content/* (nativo Y proxy
-// kiwix: el riesgo existe hoy, no espera al motor). script-src 'none' mata el
-// vector real: un ZIM con JS hostil corriendo en el navegador del admin y
-// haciendo fetch a /api/admin/* con su cookie. connect-src 'none' además corta
-// cualquier conexión a Internet desde contenido offline.
+// setContentIsolation aplica los headers a TODO /content/* (nativo y proxy).
+// El modo normal bloquea codigo. El modo interactivo solo se entrega a ZIM
+// oficiales o desbloqueados expresamente, y mantiene fuera workers y marcos.
 //
 // ENMIENDA práctica sobre el §19 del doc: style-src/img-src/font-src/media-src
 // van explícitos con 'unsafe-inline' y data: — los artículos ZIM llevan <style>
 // inline y data-URIs por todas partes, y con el default-src 'self' pelado se
-// romperían en el render. El vector que importa (script/connect) sigue en none.
-func setContentIsolation(w http.ResponseWriter) {
+// romperían en el render. En modo bloqueado script/connect siguen en none.
+func setContentIsolation(w http.ResponseWriter, interactive bool) {
 	h := w.Header()
-	h.Set("Content-Security-Policy",
-		"default-src 'self'; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; "+
-			"style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; media-src 'self'")
+	scriptSrc, connectSrc := "'none'", "'none'"
+	if interactive {
+		scriptSrc = "'self' 'unsafe-inline'"
+		connectSrc = "'self'"
+	}
+	h.Set("Content-Security-Policy", fmt.Sprintf(
+		"default-src 'self'; script-src %s; connect-src %s; frame-src 'none'; object-src 'none'; "+
+			"worker-src 'none'; base-uri 'none'; form-action 'self'; style-src 'self' 'unsafe-inline'; "+
+			"img-src 'self' data:; font-src 'self' data:; media-src 'self' data: blob:", scriptSrc, connectSrc))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 }

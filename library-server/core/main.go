@@ -65,6 +65,7 @@ type Server struct {
 	// de siempre. Toggle: ZIM_ENGINE=kiwix (default) | native; ambos caminos
 	// conviven hasta el final del plan de retirada — rollback = 1 env var.
 	zimNative *nativeZims
+	zimAdmin  *adminZim
 }
 
 func env(k, def string) string {
@@ -293,7 +294,8 @@ func main() {
 	if libraryXML == "" && zimDir != "" {
 		libraryXML = filepath.Join(zimDir, "library.xml")
 	}
-	az := &adminZim{libraryXML: libraryXML, zimDir: zimDir} // gestión nativa: sin kiwix-manage
+	az := &adminZim{libraryXML: libraryXML, zimDir: zimDir, store: store} // gestión nativa: sin kiwix-manage
+	s.zimAdmin = az
 
 	// Motor ZIM: NATIVO por defecto (retirada de kiwix, §8 — 2026-07-14). El
 	// camino kiwix queda solo como rollback explícito (ZIM_ENGINE=kiwix) durante
@@ -335,6 +337,19 @@ func main() {
 	}
 	if err := mgr.ResumeIncomplete(); err != nil {
 		log.Printf("download: ResumeIncomplete: %v", err)
+	}
+	// Reconciliar descargas oficiales terminadas antes de esta version. Asi una
+	// actualizacion no obliga a descargar de nuevo colecciones como TED.
+	if jobs, err := mgr.ListByOwner("kiwix"); err != nil {
+		log.Printf("confianza ZIM: no se pudo reconciliar el catalogo: %v", err)
+	} else {
+		for _, job := range jobs {
+			if job.Status == download.StatusDone {
+				if err := az.reconcileDownloaded(job.DestPath); err != nil {
+					log.Printf("confianza ZIM %s: %v", filepath.Base(job.DestPath), err)
+				}
+			}
+		}
 	}
 	dl := &downloadDeps{mgr: mgr, root: downloadRoot}
 	dl.registerDownloadRoutes(adminMux) // cola de importación: administrativa
@@ -645,7 +660,8 @@ func (s *Server) handleContent(w http.ResponseWriter, r *http.Request) {
 	// Gate de acceso (usuarios/edad): /content/{zim}/… se sirve solo si el usuario
 	// puede ver esa colección. Las ilustraciones (/catalog/v2/illustration/…) no
 	// pasan por aquí como /content, así que no se bloquean (iconos inofensivos).
-	if zim := contentZim(r.URL.Path); zim != "" && !s.canSeeZim(s.currentUser(r), zim) {
+	zimID := contentZim(r.URL.Path)
+	if zimID != "" && !s.canSeeZim(s.currentUser(r), zimID) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "sin acceso a esta colección"})
 		return
 	}
@@ -658,7 +674,12 @@ func (s *Server) handleContent(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "service workers no permitidos en contenido ZIM"})
 			return
 		}
-		setContentIsolation(w)
+		interactive := false
+		dest := r.Header.Get("Sec-Fetch-Dest")
+		if zimID != "" && (dest == "document" || dest == "iframe" || r.Header.Get("Sec-Fetch-Mode") == "navigate") {
+			interactive = s.zimAdmin != nil && s.zimAdmin.interactiveAllowed(zimID)
+		}
+		setContentIsolation(w, interactive)
 	}
 
 	if s.zimNative != nil && isContent {
@@ -691,7 +712,7 @@ func (s *Server) handleIllustration(w http.ResponseWriter, r *http.Request) {
 		s.handleContent(w, clone)
 		return
 	}
-	setContentIsolation(w)
+	setContentIsolation(w, false)
 	s.proxy.ServeHTTP(w, r)
 }
 

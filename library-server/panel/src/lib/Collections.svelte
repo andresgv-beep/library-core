@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { getAdminZim, getCollections, registerZim, unregisterZim, getAccessMap, setAccess } from './api.js'
+  import { getAdminZim, getCollections, registerZim, unregisterZim, setZimInteractive, getAccessMap, setAccess } from './api.js'
   import { bytes, num } from './fmt.js'
   import Downloaded from './Downloaded.svelte'
 
@@ -74,6 +74,30 @@
     } catch (e) { flash = `No se pudo quitar: ${e.message}` } finally { busy = { ...busy, [z.id]: false } }
   }
 
+  async function toggleInteractive(z) {
+    const enabled = !z.interactive
+    let acknowledge = false
+    if (enabled && !z.official) {
+      acknowledge = confirm(
+        `Desbloquear contenido interactivo en "${z.title || z.file}"?\n\n` +
+        `Este ZIM no procede del catálogo oficial verificado, o el archivo ha cambiado. ` +
+        `Sus scripts se ejecutarán dentro de Noumon. Úsalo solo si confías en su origen y bajo tu responsabilidad.`
+      )
+      if (!acknowledge) return
+    }
+    busy = { ...busy, [`interactive:${z.id}`]: true }; flash = ''
+    try {
+      const r = await setZimInteractive(z.id, enabled, acknowledge)
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'error')
+      flash = enabled ? `Contenido interactivo habilitado: ${z.title || z.file}` : `Contenido interactivo bloqueado: ${z.title || z.file}`
+      await load()
+    } catch (e) {
+      flash = `No se pudo cambiar el contenido interactivo: ${e.message}`
+    } finally {
+      busy = { ...busy, [`interactive:${z.id}`]: false }
+    }
+  }
+
   const registered = $derived(zim?.registered || [])
   const unregistered = $derived(zim?.unregistered || [])
   const canManage = $derived(zim?.canManage ?? false)
@@ -129,6 +153,8 @@
             {#if z.language}<span class="badge b-info">{z.language}</span>{/if}
             {#if cid}<span class="badge {accCls(cfg.access)}">{accLabel(cfg.access)}{#if cfg.minAge > 0} · {cfg.minAge}+{/if}</span>{/if}
             {#if !z.present}<span class="badge b-warn">fichero ausente</span>{/if}
+            {#if z.official}<span class="badge b-signal">origen oficial</span>{/if}
+            {#if z.trustStale}<span class="badge b-warn">archivo cambiado</span>{/if}
           </div>
           <div class="cpath">{z.file}{#if info.itemCount} · {num(info.itemCount)} items{/if}</div>
           {#if cid}
@@ -148,6 +174,17 @@
               {/if}
             </div>
           {/if}
+          <div class="interactive-strip">
+            <span class="interactive-state" class:on={z.interactive}>
+              {z.interactive ? 'Contenido interactivo permitido' : 'Contenido interactivo bloqueado'}
+            </span>
+            <button class="chip" class:on={z.interactive} disabled={!canManage || !z.present || busy[`interactive:${z.id}`]} onclick={() => toggleInteractive(z)}>
+              {busy[`interactive:${z.id}`] ? '…' : z.interactive ? 'Bloquear scripts' : 'Desbloquear'}
+            </button>
+            {#if !z.interactive && !z.official}
+              <small>Los ZIM añadidos manualmente no ejecutan scripts hasta que los autorices.</small>
+            {/if}
+          </div>
         </div>
         <button class="btn" disabled={!canManage || busy[z.id]} onclick={() => doUnregister(z)} style="margin-top:2px">
           {busy[z.id] ? '…' : 'Quitar'}
@@ -173,4 +210,8 @@
   .acc-age small { color: var(--ink-faint); }
   .acc-dl { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-faint); margin-left: 8px; cursor: pointer; }
   .acc-dl input { cursor: pointer; }
+  .interactive-strip { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .interactive-state { font-size:11.5px; color:var(--ink-faint); }
+  .interactive-state.on { color:var(--signal); }
+  .interactive-strip small { color:var(--ink-faint); font-size:11px; }
 </style>
